@@ -1,0 +1,41 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@health-samurai/react-components/bundle.css";
+@import "@health-samurai/react-components/css";
+
+@theme {
+  --color-blue-1000: #2a8af6;
+  --color-purple-1000: #a853ba;
+  --color-red-1000: #e92a67;
+}
+
+@layer components {
+  th[data-sortable="true"] {
+    @apply cursor-pointer hover:bg-bg-tertiary;
+  }
+
+  th[data-sorted="true"] {
+    @apply bg-bg-link/3 border-b border-border-link
+  }
+
+  th[data-dragging="true"] {
+    @apply bg-bg-primary_inverse/10 scale-105 shadow-lg z-50 bg-bg-primary_inverse/10 shadow-inner;
+  }
+
+  th[data-droptarget="true"] {
+    @apply relative before:absolute before:left-0 before:top-0 before:w-1 before:h-full before:bg-border-link before:opacity-0 before:transition-opacity before:duration-150 before:opacity-100;
+  }
+
+  th[data-draggable="true"] {
+    @apply transition-all duration-150;
+  }
+
+  th[data-resizable="true"] {
+    @apply group-hover:[&:not(:last-child)]:after:opacity-30 after:absolute after:right-0 after:top-1/2 after:-translate-y-1/2 after:h-4 after:w-px after:bg-border-primary after:opacity-0 after:transition-opacity after:duration-150 hover:after:opacity-50 last:after:w-0
+  }
+}
+
+body {
+  height: 100vh;
+  margin: 0;
+}
