@@ -161,6 +161,37 @@ export const api = {
     return { items, total: total ?? items.length };
   },
 
+  async getUnmerges(params: {
+    page: number;
+    count: number;
+    filter: GetMergesFilter;
+  }): Promise<{ items: MergeTaskRow[]; total: number }> {
+    const { page, count, filter } = params;
+    const searchParams: [string, string][] = [
+      ["code", "unmerge"],
+      ["_count", String(count)],
+      ["_page", String(page)],
+      ["_sort", "-authored-on"],
+    ];
+    if (filter.status) searchParams.push(["business-status", filter.status]);
+    if (filter.source) searchParams.push(["subject", filter.source]);
+    if (filter.target) searchParams.push(["focus", filter.target]);
+    if (filter.startDate)
+      searchParams.push(["authored-on", `ge${filter.startDate}`]);
+    else if (filter.endDate)
+      searchParams.push(["authored-on", `le${filter.endDate}`]);
+
+    const { entries, total } = await aidboxSearch("Task", searchParams);
+    const items: MergeTaskRow[] = entries.map((t: any) => ({
+      id: t.id,
+      status: (t.businessStatus?.coding?.[0]?.code ?? "unmerged") as MergeStatus,
+      source: t.for?.reference,
+      target: t.focus?.reference,
+      date: t.authoredOn,
+    }));
+    return { items, total: total ?? items.length };
+  },
+
   async getMerge(id: string): Promise<MergeDetail> {
     const task = await aidboxRead("Task", id);
     const { entries: provResults } = await aidboxSearch("Provenance", [
@@ -200,6 +231,106 @@ export const api = {
 
   async readVersionedResource(reference: string) {
     return this.readResource(reference);
+  },
+
+  async buildUnmergePlan(detail: MergeDetail) {
+    const task = detail.task;
+    const sourceRef: string = task.for?.reference ?? "";
+    const targetRef: string = task.focus?.reference ?? "";
+
+    const entries: import("mdmbox-sdk").MergePlanEntry[] = [];
+
+    // Revision entities — read the version BEFORE merge to restore them
+    for (const entity of detail.entities) {
+      const ref = entity.what; // e.g. "Patient/123/_history/3"
+      const historyMatch = ref.match(/^(.+)\/_history\/(\d+)$/);
+      if (!historyMatch) continue;
+
+      const baseRef = historyMatch[1]; // "Patient/123"
+      const version = parseInt(historyMatch[2], 10);
+
+      if (entity.role === "revision") {
+        // Read the version before merge to get pre-merge state
+        if (version < 1) continue;
+        const prevResource = await this.readResource(`${baseRef}/_history/${version}`);
+        entries.push({
+          resource: prevResource,
+          request: { method: "PUT", url: baseRef },
+        });
+      } else if (entity.role === "removal") {
+        // Resource was deleted during merge — read the historical version to restore it
+        const removedResource = await this.readResource(ref);
+        // Remove meta to let the server assign new version
+        const { meta: _meta, ...rest } = removedResource;
+        entries.push({
+          resource: rest,
+          request: { method: "PUT", url: baseRef },
+        });
+      }
+    }
+
+    // Created refs — these were created during merge, need to delete them
+    for (const ref of detail.createdRefs) {
+      const resource = await this.readResource(ref);
+      const version = resource?.meta?.versionId;
+      entries.push({
+        request: {
+          method: "DELETE",
+          url: ref,
+          ...(version ? { ifMatch: `W/"${version}"` } : {}),
+        },
+      });
+    }
+
+    return { source: sourceRef, target: targetRef, entries, taskId: task.id as string };
+  },
+
+  async unmergePreview(plan: { source: string; target: string; entries: import("mdmbox-sdk").MergePlanEntry[]; taskId: string }) {
+    const result = await mdmbox.request<any>("/api/$unmerge", {
+      method: "POST",
+      body: JSON.stringify({
+        resourceType: "Parameters",
+        parameter: [
+          { name: "source", valueReference: { reference: plan.source } },
+          { name: "target", valueReference: { reference: plan.target } },
+          { name: "task", valueReference: { reference: `Task/${plan.taskId}` } },
+          { name: "preview", valueBoolean: true },
+          {
+            name: "plan",
+            resource: {
+              resourceType: "Bundle",
+              type: "transaction",
+              entry: plan.entries,
+            },
+          },
+        ],
+      }),
+    });
+    return unwrap<any>(result);
+  },
+
+  async unmerge(plan: { source: string; target: string; entries: import("mdmbox-sdk").MergePlanEntry[]; taskId: string }) {
+    const result = await mdmbox.request<any>("/api/$unmerge", {
+      method: "POST",
+      body: JSON.stringify({
+        resourceType: "Parameters",
+        parameter: [
+          { name: "source", valueReference: { reference: plan.source } },
+          { name: "target", valueReference: { reference: plan.target } },
+          { name: "task", valueReference: { reference: `Task/${plan.taskId}` } },
+          { name: "preview", valueBoolean: false },
+          {
+            name: "plan",
+            resource: {
+              resourceType: "Bundle",
+              type: "transaction",
+              entry: plan.entries,
+            },
+          },
+        ],
+      }),
+    });
+    return unwrap<any>(result);
   },
 
   async getPatientSummary(id: string): Promise<PatientFullInfo> {

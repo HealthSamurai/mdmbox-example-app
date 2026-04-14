@@ -25,6 +25,7 @@ const toasterStyles = {
 const navTabs = [
   { id: "patients", label: "Patients", pathTo: "/patients" },
   { id: "merges", label: "Merges", pathTo: "/merges" },
+  { id: "unmerges", label: "Unmerges", pathTo: "/unmerges" },
 ];
 
 export default function Layout({ activeTab, breadcrumbItems, children }: LayoutProps) {

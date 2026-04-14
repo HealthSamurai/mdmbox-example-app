@@ -1,0 +1,13 @@
+import Layout from "@/components/layout";
+import { UnmergesTable } from "@/components/unmerges-table";
+
+export function UnmergesPage() {
+  return (
+    <Layout
+      activeTab="unmerges"
+      breadcrumbItems={[{ title: "Unmerges", link: "/unmerges" }]}
+    >
+      <UnmergesTable />
+    </Layout>
+  );
+}

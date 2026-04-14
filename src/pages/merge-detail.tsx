@@ -1,9 +1,11 @@
 import { useParams, useNavigate } from "react-router";
 import { useEffect, useState } from "react";
 import Layout from "@/components/layout";
-import { Button, MdmDrawer } from "@/components/ui";
+import { Button, MdmDrawer, toast } from "@/components/ui";
+import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import type { MergeDetail } from "@/api/types";
+import type { MergePlanEntry, TransactionBundle } from "mdmbox-sdk";
 
 const RoleBadge = ({ role }: { role: string }) => {
   const color =
@@ -41,6 +43,13 @@ export function MergeDetailPage() {
     body: any;
   } | null>(null);
   const [loadingResource, setLoadingResource] = useState(false);
+  const [isUnmerging, setIsUnmerging] = useState(false);
+  const [unmergePreview, setUnmergePreview] = useState<{
+    ok: boolean;
+    message: string;
+    bundle: TransactionBundle | null;
+  } | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<MergePlanEntry | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -61,6 +70,44 @@ export function MergeDetailPage() {
       setSelectedResource({ title: reference, body: { error: e?.message ?? "Failed" } });
     } finally {
       setLoadingResource(false);
+    }
+  };
+
+  const handleUnmergePreview = async () => {
+    if (!detail) return;
+    setUnmergePreview(null);
+    try {
+      const plan = await api.buildUnmergePlan(detail);
+      const response = await api.unmergePreview(plan);
+      const payload = response.resource;
+      const outcomeParam = payload?.parameter?.find((p: any) => p.name === "outcome");
+      const outcome = outcomeParam?.resource;
+      const bundleParam = payload?.parameter?.find((p: any) => p.name === "bundle");
+      const bundle = bundleParam?.resource as TransactionBundle | undefined;
+      const msg =
+        outcome?.issue?.[0]?.details?.text ??
+        outcome?.issue?.[0]?.diagnostics ??
+        "Unmerge plan is valid";
+      setUnmergePreview({ ok: true, message: msg, bundle: bundle ?? null });
+    } catch (e: any) {
+      const msg = e?.message ?? "Failed to build unmerge plan";
+      setUnmergePreview({ ok: false, message: msg, bundle: null });
+      toast.error({ title: "Preview failed", description: msg });
+    }
+  };
+
+  const handleUnmerge = async () => {
+    if (!detail) return;
+    setIsUnmerging(true);
+    try {
+      const plan = await api.buildUnmergePlan(detail);
+      await api.unmerge(plan);
+      toast.success({ title: "Unmerge completed" });
+      navigate("/merges");
+    } catch (e: any) {
+      toast.error({ title: "Unmerge failed", description: e?.message ?? "Unknown error" });
+    } finally {
+      setIsUnmerging(false);
     }
   };
 
@@ -189,18 +236,127 @@ export function MergeDetailPage() {
 
         {/* Actions */}
         <div className="flex gap-2">
+          {status === "merged" && (
+            <>
+              <Button onClick={handleUnmerge} disabled={isUnmerging}>
+                {isUnmerging ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 size={16} className="animate-spin" />
+                    Unmerging...
+                  </span>
+                ) : (
+                  "Unmerge"
+                )}
+              </Button>
+              <Button variant="secondary" onClick={handleUnmergePreview}>
+                Preview Unmerge
+              </Button>
+            </>
+          )}
           <Button variant="secondary" onClick={() => navigate("/merges")}>
             Back to merges
           </Button>
         </div>
+
+        {/* Unmerge preview */}
+        {unmergePreview && (
+          <div className="mt-4">
+            <div className={`text-sm font-medium mb-2 ${unmergePreview.ok ? "text-green-600" : "text-red-600"}`}>
+              {unmergePreview.ok ? "\u2713 " : "\u2717 "}{unmergePreview.message}
+            </div>
+            {unmergePreview.ok && unmergePreview.bundle && unmergePreview.bundle.entry.length > 0 && (
+              <div className="rounded-lg border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/50 border-b">
+                      <th className="text-left py-2 px-3 font-medium w-24">Operation</th>
+                      <th className="text-left py-2 px-3 font-medium w-64">Resource</th>
+                      <th className="text-left py-2 px-3 font-medium w-32">ifMatch</th>
+                      <th className="text-left py-2 px-3 font-medium">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unmergePreview.bundle.entry.map((entry, i) => {
+                      const method = entry.request.method;
+                      const resourceType = (entry.resource as any)?.resourceType;
+                      const resourceId = (entry.resource as any)?.id;
+                      const details = resourceType
+                        ? resourceId
+                          ? `${resourceType}/${resourceId}`
+                          : `New ${resourceType}`
+                        : "\u2014";
+                      const hasResource = !!entry.resource;
+                      return (
+                        <tr
+                          key={i}
+                          className={`border-b last:border-b-0 ${hasResource ? "cursor-pointer hover:bg-muted/40" : ""}`}
+                          onClick={() => hasResource && setSelectedEntry(entry)}
+                        >
+                          <td className="py-2 px-3">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                                method === "DELETE"
+                                  ? "bg-red-100 text-red-700"
+                                  : method === "POST"
+                                    ? "bg-green-100 text-green-700"
+                                    : "bg-blue-100 text-blue-700"
+                              }`}
+                            >
+                              {method}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-mono text-xs break-all">
+                            {entry.request.url}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-xs text-muted-foreground">
+                            {entry.request.ifMatch ?? "\u2014"}
+                          </td>
+                          <td className="py-2 px-3 text-muted-foreground text-xs">{details}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <MdmDrawer
-        open={!!selectedResource}
-        onOpenChange={(open) => !open && setSelectedResource(null)}
-        title={selectedResource?.title ?? ""}
+        open={!!selectedResource || !!selectedEntry}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedResource(null);
+            setSelectedEntry(null);
+          }
+        }}
+        title={
+          selectedEntry ? (
+            <div className="flex items-center gap-3">
+              <span
+                className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                  selectedEntry.request.method === "DELETE"
+                    ? "bg-red-100 text-red-700"
+                    : selectedEntry.request.method === "POST"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-blue-100 text-blue-700"
+                }`}
+              >
+                {selectedEntry.request.method}
+              </span>
+              <span className="font-mono text-sm">{selectedEntry.request.url}</span>
+            </div>
+          ) : (
+            selectedResource?.title ?? ""
+          )
+        }
         content={
-          loadingResource ? (
+          selectedEntry?.resource ? (
+            <pre className="text-xs font-mono p-4 overflow-auto whitespace-pre-wrap break-all">
+              {JSON.stringify(selectedEntry.resource, null, 2)}
+            </pre>
+          ) : loadingResource ? (
             <div className="p-4 text-sm text-muted-foreground">Loading...</div>
           ) : (
             <pre className="text-xs font-mono p-4 overflow-auto whitespace-pre-wrap break-all">
