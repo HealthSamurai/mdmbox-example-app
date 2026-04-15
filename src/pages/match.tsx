@@ -50,7 +50,7 @@ export function MatchPage() {
   useEffect(() => {
     if (!id) return;
     Promise.all([
-      api.getModel("sonic-patient-model"),
+      api.getModel("patient-model"),
       api.getPatients({ page: 1, count: 1, filter: { id } }),
     ]).then(([loadedModel, patients]) => {
       setModel(loadedModel);

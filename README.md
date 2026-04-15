@@ -6,12 +6,10 @@ Built with React, Vite, Tailwind CSS, and [Aidbox](https://www.health-samurai.io
 
 ## Prerequisites
 
+- [Docker](https://www.docker.com/) and Docker Compose
 - [Bun](https://bun.sh/) runtime
-- Running [Aidbox](https://www.health-samurai.io/aidbox) instance with patient data
-- Running [MDMbox](https://www.health-samurai.io/mdmbox) instance
-- An Aidbox Client configured with Basic authentication — see [Basic HTTP Authentication](https://www.health-samurai.io/docs/aidbox/access-control/authentication/basic-http-authentication) for setup instructions
 
-## Getting started
+## Quick start
 
 ```bash
 # Clone the repo
@@ -21,14 +19,48 @@ cd mdmbox-example-app
 # Install dependencies
 bun install
 
-# Copy and configure environment
-cp .env.example .env
+# Start infrastructure (Postgres, Aidbox, MDMbox)
+docker compose up -d
+
+# Initialize: create client, load sample data, set up matching model
+./setup/run.sh
 
 # Start the dev server
 bun run dev
 ```
 
 Open http://localhost:3002 in your browser.
+
+## Infrastructure
+
+`docker compose up -d` starts three services:
+
+| Service | Image | Port | Description |
+|---|---|---|---|
+| `aidbox-db` | `postgres:18` | 5438 | PostgreSQL database |
+| `aidbox` | `healthsamurai/aidboxone:edge` | 8888 | Aidbox FHIR server |
+| `mdmbox` | `healthsamurai/mdmbox:edge` | 3003 | MDMbox matching engine |
+
+## Setup
+
+The `setup/` folder contains initialization resources:
+
+| File | Description |
+|---|---|
+| `run.sh` | Init script — waits for services, then runs all setup steps |
+| `init-sql.json` | Pre-built JSON wrapper for `init.sql` (for Aidbox `/$sql` endpoint) |
+| `app-client.json` | Aidbox Client resource with Basic auth |
+| `patient-model.json` | MDMbox matching model configuration |
+| `patients-query.yaml` | AidboxQuery for patient search |
+
+The init script performs the following steps:
+
+1. Waits for Aidbox and MDMbox to be ready
+2. Creates SQL functions (via Aidbox `/$sql`)
+3. Creates an Aidbox Client for Basic auth
+4. Loads 1000 sample patients
+5. Creates an AidboxQuery for patient search
+6. Creates a matching model in MDMbox
 
 ## Environment variables
 
