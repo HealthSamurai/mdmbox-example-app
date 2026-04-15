@@ -18,7 +18,7 @@ done
 echo "MDMbox is ready."
 
 echo "Creating SQL functions ..."
-curl -sf -X POST "$AIDBOX_URL/\$sql" \
+curl -f -X POST "$AIDBOX_URL/\$sql" \
   -H "Content-Type: application/json" \
   -u "root:root" \
   -d @"$SCRIPT_DIR/init-sql.json"
@@ -26,7 +26,7 @@ echo ""
 echo "SQL functions created."
 
 echo "Creating Client resource in Aidbox ..."
-curl -sf -X PUT "$AIDBOX_URL/fhir/Client/basic" \
+curl -f -X PUT "$AIDBOX_URL/fhir/Client/basic" \
   -H "Content-Type: application/json" \
   -u "root:root" \
   -d @"$SCRIPT_DIR/app-client.json"
@@ -34,7 +34,7 @@ echo ""
 echo "Client created."
 
 echo "Loading sample Patient data ..."
-curl -sf -X POST "$AIDBOX_URL/fhir/Patient/\$load" \
+curl -f -X POST "$AIDBOX_URL/fhir/Patient/\$load" \
   -H "Content-Type: text/yaml" \
   -u "root:root" \
   -d "source: 'https://storage.googleapis.com/aidbox-public/fake1000.ndjson.gz'"
@@ -42,7 +42,7 @@ echo ""
 echo "Patient data loaded."
 
 echo "Creating AidboxQuery/patients ..."
-curl -sf -X PUT "$AIDBOX_URL/AidboxQuery/patients" \
+curl -f -X PUT "$AIDBOX_URL/AidboxQuery/patients" \
   -H "Content-Type: text/yaml" \
   -u "root:root" \
   --data-binary @"$SCRIPT_DIR/patients-query.yaml"
@@ -50,7 +50,7 @@ echo ""
 echo "AidboxQuery created."
 
 echo "Creating MatchingModel in MDMbox ..."
-curl -sf -X POST "$MDMBOX_URL/api/models" \
+curl -f -X POST "$MDMBOX_URL/api/models" \
   -H "Content-Type: application/json" \
   -d @"$SCRIPT_DIR/patient-model.json"
 echo ""

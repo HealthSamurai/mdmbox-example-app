@@ -17,16 +17,20 @@ git clone https://github.com/HealthSamurai/mdmbox-example-app.git
 cd mdmbox-example-app
 
 # Install dependencies
-bun install
+npm install
 
 # Start infrastructure (Postgres, Aidbox, MDMbox)
 docker compose up -d
+```
 
+Go to http://localhost:8888 and acitvate Aidbox License
+
+```bash
 # Initialize: create client, load sample data, set up matching model
 ./setup/run.sh
 
 # Start the dev server
-bun run dev
+npm run dev
 ```
 
 Open http://localhost:3002 in your browser.
