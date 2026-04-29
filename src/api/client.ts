@@ -1,4 +1,4 @@
-import { makeAidboxClient, makeClient as makeMdmboxClient } from "mdmbox-sdk";
+import { makeClient as makeMdmboxClient } from "mdmbox-sdk";
 import type {
   PatientRow,
   PatientFullInfo,
@@ -10,52 +10,9 @@ import type {
   MergeStatus,
 } from "./types";
 
-const aidbox = makeAidboxClient({ baseurl: window.location.origin });
+export const mdmbox = makeMdmboxClient({ baseUrl: window.location.origin });
 
-export const mdmbox = makeMdmboxClient({ baseUrl: `${window.location.origin}/mdm-api` });
-
-// ==================== Aidbox helpers via rawRequest ====================
-
-async function aidboxFetch(method: string, url: string): Promise<any> {
-  const resp = await aidbox.rawRequest({ method: method as any, url });
-  return resp.response.json();
-}
-
-async function aidboxRead(type: string, id: string): Promise<any> {
-  return aidboxFetch("GET", `/fhir/${type}/${id}`);
-}
-
-async function aidboxSearch(
-  type: string,
-  params: [string, string][]
-): Promise<{ entries: any[]; total?: number }> {
-  const qs = new URLSearchParams(params).toString();
-  const bundle = await aidboxFetch("GET", `/fhir/${type}?${qs}`);
-  return {
-    entries: bundle.entry?.map((e: any) => e.resource) ?? [],
-    total: bundle.total,
-  };
-}
-
-async function aidboxQuery<T = any>(
-  name: string,
-  params?: Record<string, string | number | undefined>
-): Promise<{ data: T[]; total?: number }> {
-  const filtered = Object.entries(params ?? {}).filter(
-    ([, v]) => v !== undefined && v !== ""
-  );
-  const qs = filtered.length
-    ? "?" + new URLSearchParams(filtered.map(([k, v]) => [k, String(v)])).toString()
-    : "";
-  const bundle = await aidboxFetch("GET", `/$query/${name}${qs}`);
-  const entries = bundle.entry || bundle.data || [];
-  return {
-    data: entries.map((e: any) => (e.resource ?? e) as T),
-    total: bundle.total,
-  };
-}
-
-// ==================== Unwrap helper ====================
+// ==================== Helpers ====================
 
 function unwrap<T>(result: { isErr(): boolean; value: any }): T {
   if (result.isErr()) {
@@ -69,6 +26,51 @@ function unwrap<T>(result: { isErr(): boolean; value: any }): T {
   return result.value;
 }
 
+async function fhirRead<T = any>(type: string, id: string): Promise<T> {
+  const result = await mdmbox.read<T>({ resourceType: type, id });
+  return unwrap<{ resource: T }>(result).resource;
+}
+
+async function fhirSearch(
+  type: string,
+  params: [string, string][]
+): Promise<{ entries: any[]; total?: number }> {
+  const result = await mdmbox.search<any>({ resourceType: type, params });
+  const bundle = unwrap<{ resource: any }>(result).resource;
+  return {
+    entries: bundle.entry?.map((e: any) => e.resource) ?? [],
+    total: bundle.total,
+  };
+}
+
+async function fhirReadReference<T = any>(reference: string): Promise<T> {
+  const result = await mdmbox.readReference<T>({ reference });
+  return unwrap<{ resource: T }>(result).resource;
+}
+
+// ==================== Flatten ====================
+
+function flattenPatient(p: any): PatientRow {
+  const name = p.name?.[0];
+  const address = p.address?.[0];
+  const phone = p.telecom?.find((t: any) => t.system === "phone")?.value;
+  const email = p.telecom?.find((t: any) => t.system === "email")?.value;
+  return {
+    id: p.id,
+    firstname: name?.given?.[0],
+    lastname: name?.family,
+    birthdate: p.birthDate,
+    gender: p.gender,
+    phonenumber: phone,
+    email,
+    street: address?.line?.[0],
+    city: address?.city,
+    state: address?.state,
+    zip: address?.postalCode,
+    country: address?.country,
+  };
+}
+
 // ==================== API ====================
 
 export const api = {
@@ -76,23 +78,22 @@ export const api = {
     page: number;
     count: number;
     filter: GetPatientsFilter;
-    sortDir?: string;
-    sortBy?: string;
   }): Promise<{ items: PatientRow[]; total: number }> {
-    const { page, count, filter, sortDir, sortBy } = params;
-    const result = await aidboxQuery<PatientRow>("patients", {
-      _page: page,
-      _count: count,
-      _sortDir: sortDir,
-      _sortBy: sortBy,
-      id: filter.id,
-      firstName: filter.firstName,
-      lastName: filter.lastName,
-      birthdate: filter.birthdate,
-      phone: filter.phone,
-      email: filter.email,
-    });
-    return { items: result.data, total: result.total ?? 0 };
+    const { page, count, filter } = params;
+    const searchParams: [string, string][] = [
+      ["_count", String(count)],
+      ["_page", String(page)],
+      ["_total", "accurate"],
+    ];
+    if (filter.id) searchParams.push(["_id", filter.id]);
+    if (filter.firstName) searchParams.push(["given", filter.firstName]);
+    if (filter.lastName) searchParams.push(["family", filter.lastName]);
+    if (filter.birthdate) searchParams.push(["birthdate", filter.birthdate]);
+    if (filter.phone) searchParams.push(["phone", filter.phone]);
+    if (filter.email) searchParams.push(["email", filter.email]);
+
+    const { entries, total } = await fhirSearch("Patient", searchParams);
+    return { items: entries.map(flattenPatient), total: total ?? entries.length };
   },
 
   async matchPatientById(
@@ -124,8 +125,8 @@ export const api = {
 
   async getMergePair(params: { sourceId: string; targetId: string }) {
     const [source, target] = await Promise.all([
-      aidboxRead("Patient", params.sourceId),
-      aidboxRead("Patient", params.targetId),
+      fhirRead("Patient", params.sourceId),
+      fhirRead("Patient", params.targetId),
     ]);
     return { sourcePatient: source, targetPatient: target };
   },
@@ -141,6 +142,7 @@ export const api = {
       ["_count", String(count)],
       ["_page", String(page)],
       ["_sort", "-authored-on"],
+      ["_total", "accurate"],
     ];
     if (filter.status) searchParams.push(["business-status", filter.status]);
     if (filter.source) searchParams.push(["subject", filter.source]);
@@ -150,7 +152,7 @@ export const api = {
     else if (filter.endDate)
       searchParams.push(["authored-on", `le${filter.endDate}`]);
 
-    const { entries, total } = await aidboxSearch("Task", searchParams);
+    const { entries, total } = await fhirSearch("Task", searchParams);
     const items: MergeTaskRow[] = entries.map((t: any) => ({
       id: t.id,
       status: (t.businessStatus?.coding?.[0]?.code ?? "merged") as MergeStatus,
@@ -172,6 +174,7 @@ export const api = {
       ["_count", String(count)],
       ["_page", String(page)],
       ["_sort", "-authored-on"],
+      ["_total", "accurate"],
     ];
     if (filter.status) searchParams.push(["business-status", filter.status]);
     if (filter.source) searchParams.push(["subject", filter.source]);
@@ -181,7 +184,7 @@ export const api = {
     else if (filter.endDate)
       searchParams.push(["authored-on", `le${filter.endDate}`]);
 
-    const { entries, total } = await aidboxSearch("Task", searchParams);
+    const { entries, total } = await fhirSearch("Task", searchParams);
     const items: MergeTaskRow[] = entries.map((t: any) => ({
       id: t.id,
       status: (t.businessStatus?.coding?.[0]?.code ?? "unmerged") as MergeStatus,
@@ -193,8 +196,8 @@ export const api = {
   },
 
   async getMerge(id: string): Promise<MergeDetail> {
-    const task = await aidboxRead("Task", id);
-    const { entries: provResults } = await aidboxSearch("Provenance", [
+    const task = await fhirRead("Task", id);
+    const { entries: provResults } = await fhirSearch("Provenance", [
       ["target", `Task/${id}`],
       ["_count", "1"],
     ]);
@@ -222,15 +225,11 @@ export const api = {
   },
 
   async readResource(reference: string) {
-    // handles "Patient/123/_history/2" and "Patient/123"
-    const parts = reference.split("/");
-    const type = parts[0];
-    const rest = parts.slice(1).join("/");
-    return aidboxRead(type, rest);
+    return fhirReadReference(reference);
   },
 
   async readVersionedResource(reference: string) {
-    return this.readResource(reference);
+    return fhirReadReference(reference);
   },
 
   async buildUnmergePlan(detail: MergeDetail) {
@@ -240,17 +239,15 @@ export const api = {
 
     const entries: import("mdmbox-sdk").MergePlanEntry[] = [];
 
-    // Revision entities — read the version BEFORE merge to restore them
     for (const entity of detail.entities) {
-      const ref = entity.what; // e.g. "Patient/123/_history/3"
+      const ref = entity.what;
       const historyMatch = ref.match(/^(.+)\/_history\/(\d+)$/);
       if (!historyMatch) continue;
 
-      const baseRef = historyMatch[1]; // "Patient/123"
+      const baseRef = historyMatch[1];
       const version = parseInt(historyMatch[2], 10);
 
       if (entity.role === "revision") {
-        // Read the version before merge to get pre-merge state
         if (version < 1) continue;
         const prevResource = await this.readResource(`${baseRef}/_history/${version}`);
         entries.push({
@@ -258,9 +255,7 @@ export const api = {
           request: { method: "PUT", url: baseRef },
         });
       } else if (entity.role === "removal") {
-        // Resource was deleted during merge — read the historical version to restore it
-        const removedResource = await this.readResource(ref);
-        // Remove meta to let the server assign new version
+        const removedResource: any = await this.readResource(ref);
         const { meta: _meta, ...rest } = removedResource;
         entries.push({
           resource: rest,
@@ -269,9 +264,8 @@ export const api = {
       }
     }
 
-    // Created refs — these were created during merge, need to delete them
     for (const ref of detail.createdRefs) {
-      const resource = await this.readResource(ref);
+      const resource: any = await this.readResource(ref);
       const version = resource?.meta?.versionId;
       entries.push({
         request: {
@@ -334,7 +328,7 @@ export const api = {
   },
 
   async getPatientSummary(id: string): Promise<PatientFullInfo> {
-    const patient = await aidboxRead("Patient", id);
+    const patient: any = await fhirRead("Patient", id);
     return {
       summary: {
         id: patient.id,

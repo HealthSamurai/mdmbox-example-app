@@ -7,3 +7,4 @@ dist
 .calva
 .clj-kondo
 .lsp
+.claude

@@ -2,7 +2,7 @@
 
 Example application demonstrating [mdmbox-sdk](https://github.com/HealthSamurai/mdmbox-sdk) usage — patient matching, merging, and deduplication on FHIR servers.
 
-Built with React, Vite, Tailwind CSS, and [Aidbox](https://www.health-samurai.io/aidbox) as the FHIR backend.
+Built with React, Vite, Tailwind CSS, and [MDMbox](https://www.health-samurai.io/) as the FHIR backend (via its libox FHIR-proxy).
 
 ## Prerequisites
 
@@ -12,21 +12,17 @@ Built with React, Vite, Tailwind CSS, and [Aidbox](https://www.health-samurai.io
 ## Quick start
 
 ```bash
-# Clone the repo
 git clone https://github.com/HealthSamurai/mdmbox-example-app.git
 cd mdmbox-example-app
 
-# Install dependencies
 bun install
 
-# Start infrastructure (Postgres, Aidbox, MDMbox)
+# Start infrastructure (Postgres, MDMbox)
 docker compose up -d
-```
 
-Go to http://localhost:8888 and acitvate Aidbox License
+Go to http://localhost:3003/admin and acitvate license
 
-```bash
-# Initialize: create client, load sample data, set up matching model
+# Load sample patients and create the matching model
 ./setup/run.sh
 
 # Start the dev server
@@ -37,13 +33,12 @@ Open http://localhost:3002 in your browser.
 
 ## Infrastructure
 
-`docker compose up -d` starts three services:
+`docker compose up -d` starts two services:
 
 | Service | Image | Port | Description |
 |---|---|---|---|
-| `aidbox-db` | `postgres:18` | 5438 | PostgreSQL database |
-| `aidbox` | `healthsamurai/aidboxone:edge` | 8888 | Aidbox FHIR server |
-| `mdmbox` | `healthsamurai/mdmbox:edge` | 3003 | MDMbox matching engine |
+| `mdmbox-db` | `postgres:18` | 5438 | PostgreSQL database |
+| `mdmbox` | `healthsamurai/mdmbox:edge` | 3003 | MDMbox (matching engine + libox FHIR-proxy) |
 
 ## Setup
 
@@ -51,33 +46,25 @@ The `setup/` folder contains initialization resources:
 
 | File | Description |
 |---|---|
-| `run.sh` | Init script — waits for services, then runs all setup steps |
-| `init-sql.json` | Pre-built JSON wrapper for `init.sql` (for Aidbox `/$sql` endpoint) |
-| `app-client.json` | Aidbox Client resource with Basic auth |
+| `run.sh` | Init script — waits for MDMbox, loads sample data, creates the matching model |
 | `patient-model.json` | MDMbox matching model configuration |
-| `patients-query.yaml` | AidboxQuery for patient search |
 
 The init script performs the following steps:
 
-1. Waits for Aidbox and MDMbox to be ready
-2. Creates SQL functions (via Aidbox `/$sql`)
-3. Creates an Aidbox Client for Basic auth
-4. Loads 1000 sample patients
-5. Creates an AidboxQuery for patient search
-6. Creates a matching model in MDMbox
+1. Waits for MDMbox to be ready
+2. Loads 1000 sample patients via `POST /fhir-server-api/$load`
+3. Creates a matching model in MDMbox
 
 ## Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `AIDBOX_URL` | `http://localhost:8888` | Aidbox FHIR server URL |
-| `AIDBOX_AUTH` | `Basic YmFzaWM6c2VjcmV0` | Aidbox Basic auth credentials |
 | `MDMBOX_URL` | `http://localhost:3003` | MDMbox API URL |
 | `PORT` | `3000` | Production server port |
 
 ## Features
 
-- **Patient search** — search, filter, sort, and paginate patients from Aidbox
+- **Patient search** — search, filter, and paginate patients via FHIR search
 - **Duplicate matching** — find potential duplicates using MDMbox matching models with configurable thresholds
 - **Record merging** — side-by-side field comparison, reference relinking, merge preview and execution
 - **Merge history** — browse and inspect past merge operations with provenance details
@@ -98,7 +85,7 @@ bun run build
 bun run serve
 ```
 
-The production server proxies `/mdm-api/*` to MDMbox, `/fhir/*` and `/$query/*` to Aidbox, and serves the SPA from `dist/`.
+The production server proxies `/api/*` and `/fhir-server-api/*` to MDMbox, and serves the SPA from `dist/`.
 
 ## License
 

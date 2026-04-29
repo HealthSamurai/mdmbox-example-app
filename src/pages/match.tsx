@@ -8,7 +8,6 @@ import { paramsToObject } from "@/lib/utils";
 
 function fhirPatientToMatchRow(
   resource: Record<string, any>,
-  encounters: number,
   duplicate: boolean,
   matchWeight?: number
 ): PatientMatchRow {
@@ -24,7 +23,6 @@ function fhirPatientToMatchRow(
     state: resource.address?.[0]?.state || "",
     zip: resource.address?.[0]?.postalCode || "",
     country: resource.address?.[0]?.country || "",
-    encounters,
     weight: matchWeight,
     duplicate,
   };
@@ -74,7 +72,6 @@ export function MatchPage() {
         response.results.map((r) =>
           fhirPatientToMatchRow(
             { id: r.id, ...r.resource },
-            (r.projection.encounter_count as number) ?? 0,
             false,
             r.score
           )

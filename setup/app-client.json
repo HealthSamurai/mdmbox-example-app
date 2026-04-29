@@ -1,8 +1,0 @@
-{
-  "secret": "secret",
-  "grant_types": [
-    "basic"
-  ],
-  "id": "basic",
-  "resourceType": "Client"
-}

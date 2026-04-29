@@ -12,7 +12,6 @@ import {
   ColumnDef,
   ColumnFiltersState,
   PaginationState,
-  SortingState,
 } from "@tanstack/react-table";
 import type { PatientRow } from "@/api/types";
 import { useState, useCallback, useEffect } from "react";
@@ -136,15 +135,6 @@ const columns: ColumnDef<PatientRow>[] = [
     enableResizing: true,
   },
   {
-    accessorKey: "encounters",
-    header: () => <TableHeaderContent content={"Encounters"} />,
-    cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as number} />
-    ),
-    enablePinning: true,
-    enableResizing: true,
-  },
-  {
     id: "actions",
     header: () => <TableHeaderContent content={"Actions"} />,
     cell: ({ row }) => (
@@ -180,8 +170,6 @@ export function PatientTable() {
   const filters = searchParamsToGetPatientsFilter(params);
   const page = parseInt((params.page as string) || "1");
   const count = parseInt((params.count as string) || "20");
-  const sortBy = params.sortBy as string | undefined;
-  const sortDir = params.sortDir as string | undefined;
 
   const { uiState: initialUiState, handleUiChange } = useTableUiState(
     LOCALSTORAGE_KEY,
@@ -201,8 +189,6 @@ export function PatientTable() {
         page,
         count,
         filter: filters,
-        sortDir,
-        sortBy,
       });
       setData(result.items);
     } catch (e) {
@@ -278,12 +264,6 @@ export function PatientTable() {
       placeholder: "Search",
       value: filters.email,
     },
-    {
-      enabled: true,
-      columnId: "encounters",
-      type: "text",
-      placeholder: "Search",
-    },
   ];
 
   const updateFilter = (columnFilters: ColumnFiltersState) => {
@@ -298,19 +278,6 @@ export function PatientTable() {
     setSearchParams((prev) => {
       prev.set("page", pagination.pageIndex.toString());
       prev.set("count", pagination.pageSize.toString());
-      return prev;
-    });
-  };
-
-  const sort = (sorting: SortingState) => {
-    setSearchParams((prev) => {
-      if (sorting.length === 0) {
-        prev.delete("sortBy");
-        prev.delete("sortDir");
-      } else {
-        prev.set("sortBy", sorting[0].id);
-        prev.set("sortDir", sorting[0].desc ? "desc" : "asc");
-      }
       return prev;
     });
   };
@@ -347,13 +314,7 @@ export function PatientTable() {
             else setSelectedPatient(row);
           }}
           onPaginationChange={fetchPatients}
-          onSort={sort}
           filterConfig={filterConfig}
-          sortingConfig={
-            sortBy
-              ? [{ id: sortBy, desc: sortDir === "desc" }]
-              : []
-          }
           showZebraStripes={true}
           enableColumnReordering={true}
           onUiChange={handleUiChange}

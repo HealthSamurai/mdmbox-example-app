@@ -222,13 +222,6 @@ export function MatchTable(props: MatchTableProps) {
       enableResizing: true,
     },
     {
-      accessorKey: "encounters",
-      header: () => <TableHeaderContent content={"Encounters"} />,
-      cell: ({ row }) => <TableCellContent content={<span>{row.original.encounters}</span>} />,
-      enablePinning: true,
-      enableResizing: true,
-    },
-    {
       accessorKey: "weight",
       header: () => <TableHeaderContent content={"Weight"} />,
       cell: ({ row }) => <TableCellContent content={<span>{row.original.weight?.toFixed(4)}</span>} />,

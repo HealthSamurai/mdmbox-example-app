@@ -11,7 +11,6 @@ export type PatientRow = {
   state?: string;
   country?: string;
   zip?: string;
-  encounters?: number;
 };
 
 export type PatientSummary = {
@@ -73,7 +72,6 @@ export type PatientMatchRow = {
   state: string;
   zip: string;
   country: string;
-  encounters: number;
   weight?: number;
   duplicate: boolean;
 };
