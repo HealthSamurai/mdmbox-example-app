@@ -100,6 +100,17 @@ export function MatchTable(props: MatchTableProps) {
 
   const columns = useRef<ColumnDef<PatientMatchRow>[]>([
     {
+      accessorKey: "weight",
+      header: () => <TableHeaderContent content={"Probability"} />,
+      cell: ({ row }) => (
+        <TableCellContent
+          content={<span>{row.original.weight != null ? `${(row.original.weight * 100).toFixed(2)}%` : ""}</span>}
+        />
+      ),
+      enablePinning: true,
+      enableResizing: true,
+    },
+    {
       accessorKey: "firstname",
       header: () => <TableHeaderContent content={"First Name"} />,
       cell: ({ row }) => {
@@ -218,13 +229,6 @@ export function MatchTable(props: MatchTableProps) {
         const textColor = getDifferenceColor(row.original.id, row.original.country, props.matchPatient.country);
         return <TableCellContent content={<span className={textColor}>{row.original.country}</span>} />;
       },
-      enablePinning: true,
-      enableResizing: true,
-    },
-    {
-      accessorKey: "weight",
-      header: () => <TableHeaderContent content={"Weight"} />,
-      cell: ({ row }) => <TableCellContent content={<span>{row.original.weight?.toFixed(4)}</span>} />,
       enablePinning: true,
       enableResizing: true,
     },
