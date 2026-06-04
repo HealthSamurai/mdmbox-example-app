@@ -119,7 +119,18 @@ export const api = {
 
   async getModel(id: string) {
     const result = await mdmbox.getModel({ id });
-    return unwrap<{ resource: import("mdmbox-sdk").MatchingModel }>(result).resource;
+    // The server returns thresholds as { certain, probable }; our local
+    // MatchingModel type (in ./types) reflects that, unlike the SDK's.
+    return unwrap<{ resource: import("./types").MatchingModel }>(result).resource;
+  },
+
+  // List all matching models. The SDK only exposes getModel(id), so hit the
+  // collection endpoint directly. `resourceType` lets callers keep only the
+  // models that target a given FHIR type (e.g. "Patient").
+  async getModels(resourceType?: string) {
+    const result = await mdmbox.request<import("./types").MatchingModel[]>("/api/models");
+    const models = unwrap<{ resource: import("./types").MatchingModel[] }>(result).resource;
+    return resourceType ? models.filter((m) => m.resource === resourceType) : models;
   },
 
   async getMergePair(params: { sourceId: string; targetId: string }) {

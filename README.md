@@ -20,16 +20,13 @@ bun install
 # Start infrastructure (Postgres, MDMbox)
 docker compose up -d
 
-Go to http://localhost:3003/admin and acitvate license
-
-# Load sample patients and create the matching model
-./setup/run.sh
-
 # Start the dev server
 bun dev
 ```
 
-Open http://localhost:3002 in your browser.
+Then open http://localhost:3003 ("Welcome to MDMbox") and set things up
+through the UI — see [First run](#first-run) below. Once that's done, open
+http://localhost:3002 in your browser to use the app.
 
 ## Infrastructure
 
@@ -40,20 +37,21 @@ Open http://localhost:3002 in your browser.
 | `mdmbox-db` | `postgres:18` | 5438 | PostgreSQL database |
 | `mdmbox` | `healthsamurai/mdmbox:edge` | 3003 | MDMbox (matching engine + libox FHIR-proxy) |
 
-## Setup
+## First run
 
-The `setup/` folder contains initialization resources:
+The first time you start the stack, set MDMbox up through its own UI — no
+scripts required. Open http://localhost:3003 ("Welcome to MDMbox") and:
 
-| File | Description |
-|---|---|
-| `run.sh` | Init script — waits for MDMbox, loads sample data, creates the matching model |
-| `patient-model.json` | MDMbox matching model configuration |
+1. **Activate the license** — go to `/admin` and activate the license.
+2. **Load sample patients** — import some patient data so there's something to
+   match against (e.g. the public `fake1000.ndjson.gz` dataset).
+3. **Create a matching model** — define a `MatchingModel` for `Patient`. The
+   app's model picker lists every Patient model it finds, defaulting to one
+   named `patient-model`.
 
-The init script performs the following steps:
-
-1. Waits for MDMbox to be ready
-2. Loads 1000 sample patients via `POST /fhir-server-api/$load`
-3. Creates a matching model in MDMbox
+Everything above is done by clicking through the MDMbox UI. Once a Patient
+model exists and patients are loaded, the app at http://localhost:3002 is
+ready to use.
 
 ## Environment variables
 

@@ -58,7 +58,24 @@ export type SearchParamsObj = {
   [key: string]: string | string[] | undefined;
 };
 
-export type { MatchResult, MatchResponse, MatchingModel } from "mdmbox-sdk";
+export type { MatchResult, MatchResponse } from "mdmbox-sdk";
+import type { MatchingModel as SdkMatchingModel } from "mdmbox-sdk";
+
+/**
+ * MatchingModel as returned by `GET /api/models/{id}`. The SDK's own type still
+ * declares `thresholds?: { auto?; manual? }`, but the server now sends
+ * `{ certain, probable }` — override the field so callers read the real keys.
+ */
+export type MatchingModel = Omit<SdkMatchingModel, "thresholds"> & {
+  thresholds?: { certain?: number; probable?: number };
+};
+
+/**
+ * Per-feature log-odds contributions returned by $match for each candidate.
+ * Keys are model-defined and vary by matching model (e.g. `fn`/`dob`/`ext`/`sex`
+ * for one model, `given`/`family`/`birth_date`/... for another).
+ */
+export type MatchDetails = Record<string, number>;
 
 export type PatientMatchRow = {
   id: string;
@@ -72,8 +89,12 @@ export type PatientMatchRow = {
   state: string;
   zip: string;
   country: string;
+  /** Raw log-odds weight (search.score). */
   weight?: number;
+  /** Normalized match probability 0..1 (search.normalizedScore). */
+  normalizedScore?: number;
   duplicate: boolean;
+  matchDetails?: MatchDetails;
 };
 
 export type MergeStatus = "merged" | "unmerged";

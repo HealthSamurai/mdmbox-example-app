@@ -10,7 +10,9 @@ import { ColumnDef, PaginationState } from "@tanstack/react-table";
 import type { PatientRow, PatientMatchRow, MatchingModel } from "@/api/types";
 import { useCallback, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router";
+import { BarChart3 } from "lucide-react";
 import { PatientSummaryDrawer } from "./patient-summary-drawer";
+import { MatchChart } from "./match-chart";
 
 type SourcePatientInfoProps = {
   patient: PatientRow;
@@ -21,7 +23,9 @@ function SourcePatientInfo({ patient }: SourcePatientInfoProps) {
     <div className="w-64 p-6 space-y-3 flex-shrink-0 border-r bg-muted/30">
       <div>
         <div className="text-xs text-muted-foreground">Name</div>
-        <div className="text-sm font-medium">{patient.firstname} {patient.lastname}</div>
+        <div className="text-sm font-medium">
+          {[patient.firstname, patient.lastname].filter(Boolean).join(" ") || patient.id}
+        </div>
       </div>
       <div>
         <div className="text-xs text-muted-foreground">ID</div>
@@ -104,7 +108,24 @@ export function MatchTable(props: MatchTableProps) {
       header: () => <TableHeaderContent content={"Probability"} />,
       cell: ({ row }) => (
         <TableCellContent
-          content={<span>{row.original.weight != null ? `${(row.original.weight * 100).toFixed(2)}%` : ""}</span>}
+          content={
+            <div className="flex items-center gap-2 w-full">
+              <span>{row.original.weight != null ? row.original.weight.toFixed(2) : ""}</span>
+              {row.original.matchDetails && (
+                <button
+                  type="button"
+                  aria-label={row.getIsExpanded() ? "Hide score breakdown" : "Show score breakdown"}
+                  className="ml-auto text-muted-foreground hover:text-blue-600 transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    row.toggleExpanded();
+                  }}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          }
         />
       ),
       enablePinning: true,
@@ -303,6 +324,10 @@ export function MatchTable(props: MatchTableProps) {
           {initialUiState && (
             <div className="px-4">
               <DataTable
+                // Remount the table when the model/threshold changes so any
+                // expanded score-breakdown charts collapse (the table owns the
+                // expanded state internally and wouldn't reset on its own).
+                key={`${props.selectedModel?.id ?? ""}:${props.threshold}`}
                 columns={columns.current}
                 pageSize={props.count}
                 pageIndex={props.page - 1}
@@ -316,6 +341,14 @@ export function MatchTable(props: MatchTableProps) {
                 onUiChange={handleUiChange}
                 initialUiState={initialUiState}
                 paginationComponent={SimplePagination}
+                expandedRows
+                ExpandedRowContent={(row) =>
+                  row.row.matchDetails ? (
+                    <div className="mx-auto max-w-3xl">
+                      <MatchChart data={row.row.matchDetails} />
+                    </div>
+                  ) : null
+                }
               />
             </div>
           )}

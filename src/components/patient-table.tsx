@@ -318,11 +318,21 @@ export function PatientTable() {
           showZebraStripes={true}
           enableColumnReordering={true}
           onUiChange={handleUiChange}
-          initialUiState={initialUiState}
+          initialUiState={{
+            ...initialUiState,
+            columnPinning: {
+              left: (initialUiState.columnPinning?.left ?? []).filter(
+                (id) => id !== "actions"
+              ),
+              right: [
+                ...(initialUiState.columnPinning?.right ?? []).filter(
+                  (id) => id !== "actions"
+                ),
+                "actions",
+              ],
+            },
+          }}
           paginationComponent={SimplePagination}
-          searchButton={(btnFilters) => (
-            <Button onClick={() => updateFilter(btnFilters)}>Search</Button>
-          )}
         />
       )}
     </PatientSummaryDrawer>

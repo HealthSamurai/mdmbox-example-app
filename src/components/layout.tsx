@@ -33,9 +33,7 @@ export default function Layout({ activeTab, breadcrumbItems, children }: LayoutP
 
   return (
     <div className="flex flex-col h-screen">
-      <MdmNavbar
-        breadcrumbItems={[{ title: "MDM" }, ...breadcrumbItems]}
-      />
+      <MdmNavbar breadcrumbItems={breadcrumbItems} />
       {activeTab && (
         <MdmTabs
           defaultValue={activeTab}

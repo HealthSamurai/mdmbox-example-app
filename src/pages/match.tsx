@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import Layout from "@/components/layout";
 import { MatchTable } from "@/components/match-table";
 import { api } from "@/api/client";
-import type { PatientRow, PatientMatchRow, MatchingModel } from "@/api/types";
+import type { PatientRow, PatientMatchRow, MatchingModel, MatchDetails } from "@/api/types";
 import { paramsToObject } from "@/lib/utils";
 
 // Max candidate matches to request from $match. The table paginates over
@@ -13,7 +13,9 @@ const MATCH_RESULT_LIMIT = 100;
 function fhirPatientToMatchRow(
   resource: Record<string, any>,
   duplicate: boolean,
-  matchWeight?: number
+  matchWeight?: number,
+  matchDetails?: MatchDetails,
+  normalizedScore?: number
 ): PatientMatchRow {
   return {
     id: resource.id || "",
@@ -28,7 +30,9 @@ function fhirPatientToMatchRow(
     zip: resource.address?.[0]?.postalCode || "",
     country: resource.address?.[0]?.country || "",
     weight: matchWeight,
+    normalizedScore,
     duplicate,
+    matchDetails,
   };
 }
 
@@ -38,7 +42,7 @@ export function MatchPage() {
 
   const [matchPatient, setMatchPatient] = useState<PatientRow | null>(null);
   const [data, setData] = useState<PatientMatchRow[]>([]);
-  const [model, setModel] = useState<MatchingModel | null>(null);
+  const [models, setModels] = useState<MatchingModel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const params = paramsToObject(searchParams);
@@ -46,16 +50,30 @@ export function MatchPage() {
   const count = parseInt((params.count as string) || "10");
   const threshold = params.threshold ? parseFloat(params.threshold as string) : undefined;
 
-  const effectiveThreshold = threshold ?? model?.thresholds?.manual ?? 16;
+  // Active model is derived from the `model-id` URL param (set by the picker),
+  // falling back to "patient-model" or the first available model.
+  const modelId = params["model-id"] as string | undefined;
+  const model =
+    models.find((m) => m.id === modelId) ??
+    models.find((m) => m.id === "patient-model") ??
+    models[0] ??
+    null;
 
-  // Load model + patient info once
+  // The model now exposes thresholds as { certain, probable }. Default to the
+  // 'probable' cutoff (the lowest grade still shown in the list) when the user
+  // hasn't set one in the UI. The old `manual` key no longer exists — relying
+  // on it fell back to 16, which over-filtered candidates (empty Probability
+  // column and a flat log-odds chart for the few that survived).
+  const effectiveThreshold = threshold ?? model?.thresholds?.probable ?? 0;
+
+  // Load the list of Patient models + patient info once
   useEffect(() => {
     if (!id) return;
     Promise.all([
-      api.getModel("patient-model"),
+      api.getModels("Patient"),
       api.getPatients({ page: 1, count: 1, filter: { id } }),
-    ]).then(([loadedModel, patients]) => {
-      setModel(loadedModel);
+    ]).then(([loadedModels, patients]) => {
+      setModels(loadedModels);
       if (patients.items[0]) setMatchPatient(patients.items[0]);
     });
   }, [id]);
@@ -78,7 +96,9 @@ export function MatchPage() {
           fhirPatientToMatchRow(
             { id: r.id, ...r.resource },
             false,
-            r.score
+            r.score,
+            r.matchDetails,
+            r.normalizedScore
           )
         )
       );
@@ -101,18 +121,24 @@ export function MatchPage() {
     );
   }
 
+  // Build the name from whichever parts exist, falling back to the id so the
+  // breadcrumb never shows "undefined" for patients missing a first/last name.
+  const patientName =
+    [matchPatient.firstname, matchPatient.lastname].filter(Boolean).join(" ") ||
+    matchPatient.id;
+
   return (
     <Layout
       breadcrumbItems={[
         { title: "Patients", link: "/patients" },
-        { title: `Matches for ${matchPatient.firstname} ${matchPatient.lastname}` },
+        { title: `Matches for ${patientName}` },
       ]}
     >
       <MatchTable
         matchPatient={matchPatient}
         data={data}
         isLoading={isLoading}
-        linkageModels={[model]}
+        linkageModels={models}
         selectedModel={model}
         threshold={effectiveThreshold}
         page={page}

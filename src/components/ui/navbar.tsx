@@ -8,7 +8,7 @@ export type NavbarProps = {
 
 export function MdmNavbar({
   breadcrumbItems,
-  logoSrc = "/icons/aidbox-logo.svg",
+  logoSrc = "/icons/mdmbox-logo.svg",
   children,
 }: NavbarProps) {
   return (

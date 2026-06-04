@@ -12,7 +12,7 @@ export type MatchingModel = {
   features: { bf?: number; else?: number; expr?: string };
   'bulk-table'?: Record<string, unknown>;
   resource: string;
-  thresholds?: { auto?: number; manual?: number };
+  thresholds?: { certain?: number; probable?: number };
   vars?: Record<string, unknown>;
 };
 

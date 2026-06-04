@@ -367,7 +367,7 @@ const TableBody = <TData, _>({
             <TableRow
                 row={row}
                 isLoading={isLoading}
-                onClick={handleRowClick && ((e) => {row.toggleExpanded(); handleRowClick(row.original)(e)})}
+                onClick={handleRowClick && ((e) => handleRowClick(row.original)(e))}
                 onCellClick={onCellClick}
                 draggedColumn={draggedColumn}
                 dropTarget={dropTarget}
