@@ -121,11 +121,11 @@ export function MatchPage() {
     );
   }
 
-  // Build the name from whichever parts exist, falling back to the id so the
-  // breadcrumb never shows "undefined" for patients missing a first/last name.
+  // Build the name from whichever parts exist, falling back to `Patient/:id`
+  // so the breadcrumb stays informative for patients missing a first/last name.
   const patientName =
     [matchPatient.firstname, matchPatient.lastname].filter(Boolean).join(" ") ||
-    matchPatient.id;
+    `Patient/${matchPatient.id}`;
 
   return (
     <Layout

@@ -15,7 +15,7 @@ import type { MergeTaskRow, GetMergesFilter, MergeStatus } from "@/api/types";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router";
 import { api } from "@/api/client";
-import { paramsToObject } from "@/lib/utils";
+import { paramsToObject, withDash } from "@/lib/utils";
 
 const LOCALSTORAGE_KEY = "unmerges-table-ui-state";
 
@@ -45,7 +45,7 @@ const columns: ColumnDef<MergeTaskRow>[] = [
     accessorKey: "source",
     header: () => <TableHeaderContent content={"Source"} />,
     cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
+      <TableCellContent content={withDash(cell.getValue() as string)} />
     ),
     enablePinning: true,
     enableResizing: true,
@@ -54,7 +54,7 @@ const columns: ColumnDef<MergeTaskRow>[] = [
     accessorKey: "target",
     header: () => <TableHeaderContent content={"Target"} />,
     cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
+      <TableCellContent content={withDash(cell.getValue() as string)} />
     ),
     enablePinning: true,
     enableResizing: true,
@@ -64,7 +64,7 @@ const columns: ColumnDef<MergeTaskRow>[] = [
     header: () => <TableHeaderContent content={"Date"} />,
     cell: ({ cell }) => {
       const v = cell.getValue() as string | undefined;
-      return <TableCellContent content={v ? new Date(v).toLocaleString() : ""} />;
+      return <TableCellContent content={withDash(v ? new Date(v).toLocaleString() : "")} />;
     },
     enablePinning: true,
     enableResizing: true,
@@ -73,7 +73,7 @@ const columns: ColumnDef<MergeTaskRow>[] = [
     accessorKey: "id",
     header: () => <TableHeaderContent content={"Task ID"} />,
     cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
+      <TableCellContent content={withDash(cell.getValue() as string)} />
     ),
     enablePinning: true,
     enableResizing: true,

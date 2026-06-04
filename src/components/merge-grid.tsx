@@ -6,6 +6,7 @@ import type { MergePlanEntry, Resource, TransactionBundle } from "mdmbox-sdk";
 import { relink } from "mdmbox-sdk";
 import { mdmbox } from "@/api/client";
 import { mergeIdentifiers } from "@/lib/merge-helpers";
+import { toUSDate, withDash } from "@/lib/utils";
 
 type Patient = Record<string, any>;
 
@@ -13,6 +14,10 @@ type FieldConfig = {
   label: string;
   get: (p: Patient) => string;
   set: (p: Patient, v: string) => Patient;
+  // Optional display formatter; raw `get`/`set` values still flow through the
+  // radio group and merge state, so equality and write-back keep using the
+  // underlying FHIR value.
+  format?: (v: string) => string;
 };
 
 const FIELDS: FieldConfig[] = [
@@ -40,14 +45,10 @@ const FIELDS: FieldConfig[] = [
     },
   },
   {
-    label: "Gender",
-    get: (p) => p.gender ?? "",
-    set: (p, v) => ({ ...p, gender: v }),
-  },
-  {
     label: "Birth Date",
     get: (p) => p.birthDate ?? "",
     set: (p, v) => ({ ...p, birthDate: v }),
+    format: toUSDate,
   },
   {
     label: "Email",
@@ -61,49 +62,11 @@ const FIELDS: FieldConfig[] = [
     },
   },
   {
-    label: "Phone",
-    get: (p) => p.telecom?.find((t: any) => t.system === "phone")?.value ?? "",
-    set: (p, v) => {
-      const telecom = [...(p.telecom || [])];
-      const idx = telecom.findIndex((t: any) => t.system === "phone");
-      if (idx >= 0) telecom[idx] = { ...telecom[idx], value: v };
-      else telecom.push({ system: "phone", value: v });
-      return { ...p, telecom };
-    },
-  },
-  {
-    label: "Street",
-    get: (p) => p.address?.[0]?.line?.[0] ?? "",
-    set: (p, v) => {
-      const address = [...(p.address || [{}])];
-      address[0] = { ...address[0], line: [v] };
-      return { ...p, address };
-    },
-  },
-  {
     label: "City",
     get: (p) => p.address?.[0]?.city ?? "",
     set: (p, v) => {
       const address = [...(p.address || [{}])];
       address[0] = { ...address[0], city: v };
-      return { ...p, address };
-    },
-  },
-  {
-    label: "State",
-    get: (p) => p.address?.[0]?.state ?? "",
-    set: (p, v) => {
-      const address = [...(p.address || [{}])];
-      address[0] = { ...address[0], state: v };
-      return { ...p, address };
-    },
-  },
-  {
-    label: "ZIP",
-    get: (p) => p.address?.[0]?.postalCode ?? "",
-    set: (p, v) => {
-      const address = [...(p.address || [{}])];
-      address[0] = { ...address[0], postalCode: v };
       return { ...p, address };
     },
   },
@@ -115,10 +78,12 @@ type RowProps = {
   field2: string;
   selected: string;
   onSelect: (value: string) => void;
+  format?: (v: string) => string;
 };
 
-function Row({ label, field1, field2, selected, onSelect }: RowProps) {
+function Row({ label, field1, field2, selected, onSelect, format }: RowProps) {
   const isEqual = field1 === field2;
+  const display = (v: string) => withDash(format ? format(v) : v);
   return (
     <RadioGroup
       value={selected}
@@ -131,10 +96,10 @@ function Row({ label, field1, field2, selected, onSelect }: RowProps) {
       {isEqual ? (
         <>
           <div className="flex items-center border-r py-2 px-3">
-            <span className="text-sm">{field1}</span>
+            <span className="text-sm">{display(field1)}</span>
           </div>
           <div className="flex items-center py-2 px-3">
-            <span className="text-sm">{field2}</span>
+            <span className="text-sm">{display(field2)}</span>
           </div>
         </>
       ) : (
@@ -144,7 +109,7 @@ function Row({ label, field1, field2, selected, onSelect }: RowProps) {
           >
             <RadioGroupItem value={field1} id={`${label}-1`} />
             <label htmlFor={`${label}-1`} className="text-sm cursor-pointer ml-2">
-              {field1}
+              {display(field1)}
             </label>
           </div>
           <div
@@ -152,7 +117,7 @@ function Row({ label, field1, field2, selected, onSelect }: RowProps) {
           >
             <RadioGroupItem value={field2} id={`${label}-2`} />
             <label htmlFor={`${label}-2`} className="text-sm cursor-pointer ml-2">
-              {field2}
+              {display(field2)}
             </label>
           </div>
         </>
@@ -161,12 +126,12 @@ function Row({ label, field1, field2, selected, onSelect }: RowProps) {
   );
 }
 
-function MergeResultRow({ value, active }: { value: string; active: boolean }) {
+function MergeResultRow({ value, active, format }: { value: string; active: boolean; format?: (v: string) => string }) {
   return (
     <div
-      className={`h-[38px] flex items-center py-2 px-3 border-b last:border-b-0 ${active ? "bg-blue-50 font-bold" : "text-muted-foreground"}`}
+      className={`h-[38px] flex items-center py-2 px-3 border-b last:border-b-0 text-sm ${active ? "bg-blue-50 font-bold" : "text-muted-foreground"}`}
     >
-      {value}
+      {withDash(format ? format(value) : value)}
     </div>
   );
 }
@@ -370,6 +335,7 @@ export function MergeGrid({ patient1, patient2 }: MergeGridProps) {
                 field2={field.get(patient2)}
                 selected={field.get(resultPatient)}
                 onSelect={(value) => handleSelect(field, value)}
+                format={field.format}
               />
             ))}
           </div>
@@ -386,6 +352,7 @@ export function MergeGrid({ patient1, patient2 }: MergeGridProps) {
                 key={field.label}
                 value={field.get(resultPatient)}
                 active={field.get(patient1) !== field.get(patient2)}
+                format={field.format}
               />
             ))}
           </div>

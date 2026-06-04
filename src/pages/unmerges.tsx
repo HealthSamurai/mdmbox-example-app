@@ -7,7 +7,9 @@ export function UnmergesPage() {
       activeTab="unmerges"
       breadcrumbItems={[{ title: "Unmerges", link: "/unmerges" }]}
     >
-      <UnmergesTable />
+      <div className="p-4">
+        <UnmergesTable />
+      </div>
     </Layout>
   );
 }

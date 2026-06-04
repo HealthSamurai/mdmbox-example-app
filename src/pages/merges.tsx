@@ -7,7 +7,9 @@ export function MergesPage() {
       activeTab="merges"
       breadcrumbItems={[{ title: "Merges", link: "/merges" }]}
     >
-      <MergesTable />
+      <div className="p-4">
+        <MergesTable />
+      </div>
     </Layout>
   );
 }

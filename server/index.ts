@@ -11,6 +11,10 @@ const server = Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
 
+    if (url.pathname === "/app-info") {
+      return Response.json({ mdmboxUrl: MDMBOX_URL });
+    }
+
     if (
       url.pathname.startsWith("/api/") ||
       url.pathname.startsWith("/fhir-server-api")

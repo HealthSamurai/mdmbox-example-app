@@ -23,8 +23,20 @@ export default defineConfig(({ mode }) => {
     });
   };
 
+  // Dev-mode equivalent of the Bun server's /app-info endpoint, so the
+  // frontend can read the configured MDMbox URL without hitting it directly.
+  const appInfoPlugin = {
+    name: "app-info",
+    configureServer(server: any) {
+      server.middlewares.use("/app-info", (_req: any, res: any) => {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ mdmboxUrl: MDMBOX_URL }));
+      });
+    },
+  };
+
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), appInfoPlugin],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

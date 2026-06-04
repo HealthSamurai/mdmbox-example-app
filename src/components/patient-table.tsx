@@ -17,14 +17,23 @@ import type { PatientRow } from "@/api/types";
 import { useState, useCallback, useEffect } from "react";
 import { useSearchParams, Link, useNavigate } from "react-router";
 import { api } from "@/api/client";
-import { searchParamsToGetPatientsFilter, paramsToObject } from "@/lib/utils";
+import { searchParamsToGetPatientsFilter, paramsToObject, toUSDate, withDash } from "@/lib/utils";
 
 const columns: ColumnDef<PatientRow>[] = [
+  {
+    accessorKey: "id",
+    header: () => <TableHeaderContent content={"ID"} />,
+    cell: ({ cell }) => (
+      <TableCellContent content={withDash(cell.getValue() as string)} />
+    ),
+    enablePinning: true,
+    enableResizing: true,
+  },
   {
     accessorKey: "firstname",
     header: () => <TableHeaderContent content={"First name"} />,
     cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
+      <TableCellContent content={withDash(cell.getValue() as string)} />
     ),
     enablePinning: true,
     enableResizing: true,
@@ -34,26 +43,17 @@ const columns: ColumnDef<PatientRow>[] = [
     accessorKey: "lastname",
     header: () => <TableHeaderContent content={"Last name"} />,
     cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
+      <TableCellContent content={withDash(cell.getValue() as string)} />
     ),
     enablePinning: true,
     enableResizing: true,
     enableSorting: true,
   },
   {
-    accessorKey: "id",
-    header: () => <TableHeaderContent content={"ID"} />,
-    cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
-    ),
-    enablePinning: true,
-    enableResizing: true,
-  },
-  {
     accessorKey: "birthdate",
-    header: () => <TableHeaderContent content={"Birth"} />,
+    header: () => <TableHeaderContent content={"Birth date"} />,
     cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
+      <TableCellContent content={withDash(toUSDate(cell.getValue() as string))} />
     ),
     enablePinning: true,
     enableResizing: true,
@@ -61,75 +61,20 @@ const columns: ColumnDef<PatientRow>[] = [
     minSize: 120,
   },
   {
-    accessorKey: "phonenumber",
-    header: () => <TableHeaderContent content={"Phone number"} />,
-    cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
-    ),
-    enablePinning: true,
-    enableResizing: true,
-    enableSorting: true,
-  },
-  {
     accessorKey: "email",
     header: () => <TableHeaderContent content={"Email"} />,
     cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
+      <TableCellContent content={withDash(cell.getValue() as string)} />
     ),
     enablePinning: true,
     enableResizing: true,
     enableSorting: true,
-  },
-  {
-    accessorKey: "gender",
-    header: () => <TableHeaderContent content={"Gender"} />,
-    cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
-    ),
-    enablePinning: true,
-    enableResizing: true,
-  },
-  {
-    accessorKey: "street",
-    header: () => <TableHeaderContent content={"Street"} />,
-    cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
-    ),
-    enablePinning: true,
-    enableResizing: true,
   },
   {
     accessorKey: "city",
     header: () => <TableHeaderContent content={"City"} />,
     cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
-    ),
-    enablePinning: true,
-    enableResizing: true,
-  },
-  {
-    accessorKey: "state",
-    header: () => <TableHeaderContent content={"State"} />,
-    cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
-    ),
-    enablePinning: true,
-    enableResizing: true,
-  },
-  {
-    accessorKey: "zip",
-    header: () => <TableHeaderContent content={"ZIP"} />,
-    cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
-    ),
-    enablePinning: true,
-    enableResizing: true,
-  },
-  {
-    accessorKey: "country",
-    header: () => <TableHeaderContent content={"Country"} />,
-    cell: ({ cell }) => (
-      <TableCellContent content={cell.getValue() as string} />
+      <TableCellContent content={withDash(cell.getValue() as string)} />
     ),
     enablePinning: true,
     enableResizing: true,
@@ -249,13 +194,6 @@ export function PatientTable() {
       type: "date",
       placeholder: "Pick date",
       value: filters.birthdate ? new Date(filters.birthdate) : undefined,
-    },
-    {
-      enabled: true,
-      columnId: "phonenumber",
-      type: "text",
-      placeholder: "Search",
-      value: filters.phone,
     },
     {
       enabled: true,

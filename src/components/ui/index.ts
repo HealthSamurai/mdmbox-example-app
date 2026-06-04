@@ -47,6 +47,7 @@ export * from "./breadcrumbs";
 export * from "./custom-toast";
 export * from "./drawer";
 export * from "./navbar";
+export * from "./mdmbox-status";
 export * from "./pagination";
 export * from "./interfaces";
 export { VersionLogger } from "./version-logger";

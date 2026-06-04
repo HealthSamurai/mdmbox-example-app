@@ -13,6 +13,7 @@ import { useSearchParams, Link } from "react-router";
 import { BarChart3 } from "lucide-react";
 import { PatientSummaryDrawer } from "./patient-summary-drawer";
 import { MatchChart } from "./match-chart";
+import { toUSDate, withDash } from "@/lib/utils";
 
 type SourcePatientInfoProps = {
   patient: PatientRow;
@@ -22,38 +23,28 @@ function SourcePatientInfo({ patient }: SourcePatientInfoProps) {
   return (
     <div className="w-64 p-6 space-y-3 flex-shrink-0 border-r bg-muted/30">
       <div>
-        <div className="text-xs text-muted-foreground">Name</div>
-        <div className="text-sm font-medium">
-          {[patient.firstname, patient.lastname].filter(Boolean).join(" ") || patient.id}
-        </div>
-      </div>
-      <div>
         <div className="text-xs text-muted-foreground">ID</div>
-        <div className="text-sm font-medium">{patient.id}</div>
+        <div className="text-sm font-medium">{withDash(patient.id)}</div>
       </div>
       <div>
-        <div className="text-xs text-muted-foreground">Birth Date</div>
-        <div className="text-sm font-medium">{patient.birthdate}</div>
+        <div className="text-xs text-muted-foreground">First name</div>
+        <div className="text-sm font-medium">{withDash(patient.firstname)}</div>
       </div>
       <div>
-        <div className="text-xs text-muted-foreground">Gender</div>
-        <div className="text-sm font-medium">{patient.gender}</div>
+        <div className="text-xs text-muted-foreground">Last name</div>
+        <div className="text-sm font-medium">{withDash(patient.lastname)}</div>
       </div>
       <div>
-        <div className="text-xs text-muted-foreground">Street</div>
-        <div className="text-sm font-medium">{patient.street}</div>
+        <div className="text-xs text-muted-foreground">Birth date</div>
+        <div className="text-sm font-medium">{withDash(toUSDate(patient.birthdate))}</div>
+      </div>
+      <div>
+        <div className="text-xs text-muted-foreground">Email</div>
+        <div className="text-sm font-medium">{withDash(patient.email)}</div>
       </div>
       <div>
         <div className="text-xs text-muted-foreground">City</div>
-        <div className="text-sm font-medium">{patient.city}</div>
-      </div>
-      <div>
-        <div className="text-xs text-muted-foreground">State</div>
-        <div className="text-sm font-medium">{patient.state}</div>
-      </div>
-      <div>
-        <div className="text-xs text-muted-foreground">ZIP</div>
-        <div className="text-sm font-medium">{patient.zip}</div>
+        <div className="text-sm font-medium">{withDash(patient.city)}</div>
       </div>
     </div>
   );
@@ -105,7 +96,7 @@ export function MatchTable(props: MatchTableProps) {
   const columns = useRef<ColumnDef<PatientMatchRow>[]>([
     {
       accessorKey: "weight",
-      header: () => <TableHeaderContent content={"Probability"} />,
+      header: () => <TableHeaderContent content={"Score"} />,
       cell: ({ row }) => (
         <TableCellContent
           content={
@@ -132,6 +123,16 @@ export function MatchTable(props: MatchTableProps) {
       enableResizing: true,
     },
     {
+      accessorKey: "id",
+      header: () => <TableHeaderContent content={"ID"} />,
+      cell: ({ row }) => {
+        const textColor = getDifferenceColor(row.original.id, row.original.id, props.matchPatient.id);
+        return <TableCellContent content={<span className={textColor}>{withDash(row.original.id)}</span>} />;
+      },
+      enablePinning: true,
+      enableResizing: true,
+    },
+    {
       accessorKey: "firstname",
       header: () => <TableHeaderContent content={"First Name"} />,
       cell: ({ row }) => {
@@ -141,13 +142,13 @@ export function MatchTable(props: MatchTableProps) {
             <TableCellContent
               content={
                 <div className="flex gap-2">
-                  <span className={textColor}>{row.original.firstname}</span>
+                  <span className={textColor}>{withDash(row.original.firstname)}</span>
                   <img src="/icons/duplicate-icon.svg" alt="duplicate" className="h-6 w-6" />
                 </div>
               }
             />
           );
-        return <TableCellContent content={<span className={textColor}>{row.original.firstname}</span>} />;
+        return <TableCellContent content={<span className={textColor}>{withDash(row.original.firstname)}</span>} />;
       },
       enablePinning: true,
       enableResizing: true,
@@ -157,27 +158,17 @@ export function MatchTable(props: MatchTableProps) {
       header: () => <TableHeaderContent content={"Last Name"} />,
       cell: ({ row }) => {
         const textColor = getDifferenceColor(row.original.id, row.original.lastname, props.matchPatient.lastname);
-        return <TableCellContent content={<span className={textColor}>{row.original.lastname}</span>} />;
-      },
-      enablePinning: true,
-      enableResizing: true,
-    },
-    {
-      accessorKey: "id",
-      header: () => <TableHeaderContent content={"ID"} />,
-      cell: ({ row }) => {
-        const textColor = getDifferenceColor(row.original.id, row.original.id, props.matchPatient.id);
-        return <TableCellContent content={<span className={textColor}>{row.original.id}</span>} />;
+        return <TableCellContent content={<span className={textColor}>{withDash(row.original.lastname)}</span>} />;
       },
       enablePinning: true,
       enableResizing: true,
     },
     {
       accessorKey: "birthdate",
-      header: () => <TableHeaderContent content={"Birth"} />,
+      header: () => <TableHeaderContent content={"Birth date"} />,
       cell: ({ row }) => {
         const textColor = getDifferenceColor(row.original.id, row.original.birthdate, props.matchPatient.birthdate);
-        return <TableCellContent content={<span className={textColor}>{row.original.birthdate}</span>} />;
+        return <TableCellContent content={<span className={textColor}>{withDash(toUSDate(row.original.birthdate))}</span>} />;
       },
       enablePinning: true,
       enableResizing: true,
@@ -188,27 +179,7 @@ export function MatchTable(props: MatchTableProps) {
       header: () => <TableHeaderContent content={"Email"} />,
       cell: ({ row }) => {
         const textColor = getDifferenceColor(row.original.id, row.original.email, props.matchPatient.email);
-        return <TableCellContent content={<span className={textColor}>{row.original.email || ""}</span>} />;
-      },
-      enablePinning: true,
-      enableResizing: true,
-    },
-    {
-      accessorKey: "gender",
-      header: () => <TableHeaderContent content={"Gender"} />,
-      cell: ({ row }) => {
-        const textColor = getDifferenceColor(row.original.id, row.original.gender, props.matchPatient.gender);
-        return <TableCellContent content={<span className={textColor}>{row.original.gender}</span>} />;
-      },
-      enablePinning: true,
-      enableResizing: true,
-    },
-    {
-      accessorKey: "street",
-      header: () => <TableHeaderContent content={"Street"} />,
-      cell: ({ row }) => {
-        const textColor = getDifferenceColor(row.original.id, row.original.street, props.matchPatient.street);
-        return <TableCellContent content={<span className={textColor}>{row.original.street}</span>} />;
+        return <TableCellContent content={<span className={textColor}>{withDash(row.original.email)}</span>} />;
       },
       enablePinning: true,
       enableResizing: true,
@@ -218,37 +189,7 @@ export function MatchTable(props: MatchTableProps) {
       header: () => <TableHeaderContent content={"City"} />,
       cell: ({ row }) => {
         const textColor = getDifferenceColor(row.original.id, row.original.city, props.matchPatient.city);
-        return <TableCellContent content={<span className={textColor}>{row.original.city}</span>} />;
-      },
-      enablePinning: true,
-      enableResizing: true,
-    },
-    {
-      accessorKey: "state",
-      header: () => <TableHeaderContent content={"State"} />,
-      cell: ({ row }) => {
-        const textColor = getDifferenceColor(row.original.id, row.original.state, props.matchPatient.state);
-        return <TableCellContent content={<span className={textColor}>{row.original.state}</span>} />;
-      },
-      enablePinning: true,
-      enableResizing: true,
-    },
-    {
-      accessorKey: "zip",
-      header: () => <TableHeaderContent content={"ZIP"} />,
-      cell: ({ row }) => {
-        const textColor = getDifferenceColor(row.original.id, row.original.zip, props.matchPatient.zip);
-        return <TableCellContent content={<span className={textColor}>{row.original.zip}</span>} />;
-      },
-      enablePinning: true,
-      enableResizing: true,
-    },
-    {
-      accessorKey: "country",
-      header: () => <TableHeaderContent content={"Country"} />,
-      cell: ({ row }) => {
-        const textColor = getDifferenceColor(row.original.id, row.original.country, props.matchPatient.country);
-        return <TableCellContent content={<span className={textColor}>{row.original.country}</span>} />;
+        return <TableCellContent content={<span className={textColor}>{withDash(row.original.city)}</span>} />;
       },
       enablePinning: true,
       enableResizing: true,

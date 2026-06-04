@@ -8,10 +8,10 @@ export function FieldDisplay({ label, value }: FieldDisplayProps) {
   return (
     <div className="grid grid-cols-[1fr_3fr] gap-4">
       <p className="font-size=14px">{label}:</p>
-      <p className="font-size=14px">{value || '-'}</p>
+      <p className="font-size=14px text-text-primary">{value === null || value === undefined || value === '' ? '—' : value}</p>
     </div>
   );
-} 
+}
 
 export function FieldDisplay2({ label, value }: FieldDisplayProps) {
   return (
