@@ -154,7 +154,8 @@ body {
   letter-spacing: 0.05em;
   color: var(--text-tertiary);
 }
-.field input {
+.field input,
+.field select {
   font-family: var(--font-sans);
   font-size: 14px;
   padding: 8px 10px;
@@ -163,7 +164,8 @@ body {
   background: var(--bg-panel);
   color: var(--text);
 }
-.field input:focus { outline: none; border-color: var(--blue); }
+.field input:focus,
+.field select:focus { outline: none; border-color: var(--blue); }
 
 /* Buttons */
 .actions {
@@ -171,7 +173,7 @@ body {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
-  margin-top: 16px;
+  margin: 16px 0;
 }
 .btn {
   font-family: var(--font-sans);
@@ -184,8 +186,11 @@ body {
   transition: background 120ms, border-color 120ms, opacity 120ms;
 }
 .btn:disabled { opacity: 0.55; cursor: default; }
+.btn:focus { outline: none; }
+.btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .btn-primary { background: var(--blue); color: #fff; }
 .btn-primary:not(:disabled):hover { background: #1b66c4; }
+.btn-primary:not(:disabled):active { background: #1858a8; }
 .btn-ghost {
   background: transparent;
   border-color: var(--border);

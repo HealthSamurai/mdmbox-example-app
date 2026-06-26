@@ -131,9 +131,9 @@ services:
       PUBLIC_AIDBOX_URL: http://localhost:8888
       AIDBOX_AUTH: "Basic cm9vdDpyb290"   # root:root
       MDMBOX_URL: http://mdmbox:3000
-      MODEL_ID: patient-mdl-default
-      # URL Aidbox uses to reach this server over http-rpc (same compose network).
-      APP_BASE_URL: http://notebook:3300
+      MODEL_ID: patient-example
+      # Endpoint Aidbox calls over http-rpc — mdmbox's aidbox-app-proxy (in-network).
+      APP_ENDPOINT_URL: http://mdmbox:3000/api/aidbox-app-proxy
 
 volumes:
   aidbox_pg_data: {}
