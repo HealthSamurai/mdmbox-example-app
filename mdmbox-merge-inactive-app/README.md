@@ -1,89 +1,103 @@
-# MDMbox $merge that Deactivates the Source
+# Merge that Deactivates the Source
 
-A tiny Bun notebook. You create patients in **Aidbox**, then run **mdmbox `$merge`**
-over them. Aidbox and mdmbox share one database, so a Patient created in Aidbox is
-visible to mdmbox.
+This example shows how to run an MDMbox `$merge` that **does not delete** the
+source patient. Instead of removing the duplicate, the merge plan PUTs it back
+with `active: false` and a `replaced-by` link to the surviving target, so the
+retired record stays queryable for audit and history.
 
-The merge plan **does not delete** the source — it PUTs the source back with
-`active: false` and a `replaced-by` link to the surviving target, so the duplicate
-is retired but stays queryable for audit/history.
+Aidbox and MDMbox in this stack share one database, so a Patient created in
+Aidbox is visible to MDMbox. There are no subscriptions or webhooks here — just a
+manual, five-step `$merge` flow.
 
-No subscriptions, no webhooks — just a manual `$merge` call.
+## Set Up Aidbox and MDMbox
 
-## Flow
-
-```
-browser ──seed──▶ Bun ──PUT /fhir/Patient/{id}──▶ Aidbox   (create source + target)
-browser ──merge─▶ Bun ──POST /api/$merge──────────▶ mdmbox  (source → active:false)
-```
-
-## Run
+First of all, start Aidbox, MDMbox, and the notebook:
 
 ```bash
 $ docker compose up
 ```
 
-Then open http://localhost:3300.
+Once Aidbox is up and running, browse http://localhost:8888 and click
+"Continue with Aidbox account". This will automatically issue a developer
+license for you and redirect you back.
 
-- Aidbox: http://localhost:8888 (seed / read patients)
-- mdmbox: http://localhost:3003 ($merge)
-- notebook: http://localhost:3300
+Then do the same with MDMbox. Open http://localhost:3003 and click
+"Sign in to activate".
 
-> **License note.** Aidbox and mdmbox in this stack share one database. Each needs
-> its own activation, and they must not overwrite each other's license record in
-> the shared DB. If a service redirects every request to its login/activation page
-> (the notebook surfaces this as a clear error), activate it and retry. Aidbox will
-> refuse to start with `Required license for 'aidbox', got 'mdmbox'` if the shared
-> DB holds an mdmbox license — sort the activations out before running the flow.
+You'll see the [Welcome to MDMBox](http://localhost:3003/welcome)
+page. Click your way through the setup steps to import sample patients
+and install a matching model.
 
-## Use it
+## Run the Merge Flow
 
-1. **Seed sample patients in Aidbox** (Cell 1) — creates a target
-   (`merge-target-jane`) and a source (`merge-source-jane`) via Aidbox FHIR. Skip if
-   you already have patients.
-2. **Run `$merge`** (Cell 2) — pick the source/target ids and a preview flag, then
-   run. With `preview: false` the notebook reads the source back and shows it is now
-   `active: false`. **Read source after merge** re-checks at any time.
+Open http://localhost:3300 and follow the instructions there. This is a notebook
+that walks through the deactivating `$merge` in five steps:
 
-## The merge plan
+1. **POST `Patient/1`** — create the target (the survivor).
+2. **POST `Patient/2`** — create the source (the duplicate).
+3. **POST `$merge`** — merge `Patient/2` into `Patient/1`; the source is kept inactive.
+4. **GET `Patient/1`** — read back the merged survivor.
+5. **GET `Patient/2`** — read back the retired source (`active: false`).
 
-`$merge` executes the transaction Bundle the client sends. This example builds two
-`PUT` entries (no `DELETE`):
+## How it works
 
-1. **Target** — the surviving record (target wins scalar conflicts, arrays
-   union-merged, missing target fields filled from the source), plus a
-   `replaces` link back to the source:
+The notebook first creates two patients in Aidbox via FHIR `PUT` (upsert). The
+target is the survivor and the source is the duplicate:
 
 ```json
 {
-  "resource": {
-    "resourceType": "Patient",
-    "id": "merge-target-jane",
-    "link": [
-      { "type": "replaces", "other": { "reference": "Patient/merge-source-jane" } }
-    ]
-  },
-  "request": { "method": "PUT", "url": "Patient/merge-target-jane" }
+  "resourceType": "Patient",
+  "id": "1",
+  "active": true,
+  "name": [{ "use": "official", "given": ["Jane"], "family": "Doe" }]
 }
 ```
 
-2. **Source** — the same source resource with `active: false` and a `replaced-by`
-   link to the target (the reciprocal of the target's `replaces`):
+Then it sends a `$merge` to MDMbox. `$merge` executes the transaction Bundle the
+client sends, so deleting vs. deactivating is purely what the plan contains.
+This example builds two `PUT` entries (no `DELETE`).
+
+The first entry is the **surviving target** (target wins scalar conflicts,
+arrays are union-merged, missing target fields are filled from the source), plus
+a `replaces` link back to the source:
 
 ```json
 {
   "resource": {
     "resourceType": "Patient",
-    "id": "merge-source-jane",
+    "id": "1",
+    "link": [
+      { "type": "replaces", "other": { "reference": "Patient/2" } }
+    ]
+  },
+  "request": { "method": "PUT", "url": "Patient/1" }
+}
+```
+
+The second entry is the **source**, PUT back with `active: false` and a
+`replaced-by` link to the target (the reciprocal of the target's `replaces`):
+
+```json
+{
+  "resource": {
+    "resourceType": "Patient",
+    "id": "2",
     "active": false,
     "link": [
-      { "type": "replaced-by", "other": { "reference": "Patient/merge-target-jane" } }
+      { "type": "replaced-by", "other": { "reference": "Patient/1" } }
     ]
   },
-  "request": { "method": "PUT", "url": "Patient/merge-source-jane" }
+  "request": { "method": "PUT", "url": "Patient/2" }
 }
 ```
 
-mdmbox `$merge` has no built-in "deactivate" flag. Deleting vs. deactivating is
-purely what the plan contains: a `DELETE` entry, or this `PUT` with `active: false`.
-The `$merge` operation still records Task/Provenance for audit and unmerge.
+MDMbox `$merge` has no built-in "deactivate" flag — the behaviour comes entirely
+from the plan: a `DELETE` entry would remove the source, while this `PUT` with
+`active: false` retires it. Either way, `$merge` records Task/Provenance for
+audit and unmerge.
+
+## Services
+
+- Aidbox: http://localhost:8888 (create / read patients)
+- MDMbox: http://localhost:3003 (`$merge`)
+- notebook: http://localhost:3300

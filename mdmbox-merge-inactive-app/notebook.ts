@@ -1,13 +1,18 @@
 /**
  * mdmbox-merge-inactive-app - a single-page example served by Bun.
  *
- * No subscriptions, no webhooks. You pick a source and a target Patient and
- * click "Run $merge". The merge plan DEACTIVATES the source instead of deleting
- * it: the source is PUT with active:false and a `replaced-by` link to the
- * surviving target, so the duplicate stays queryable for audit/history.
+ * Five-step notebook that walks through a $merge which DEACTIVATES the source
+ * instead of deleting it:
  *
- * Flow:
- *   browser -> Bun -> mdmbox: POST /api/$merge with a deactivating plan
+ *   1. POST Patient/1        - create the target (survivor)
+ *   2. POST Patient/2        - create the source (duplicate)
+ *   3. POST $merge           - merge Patient/2 into Patient/1, source kept inactive
+ *   4. GET  Patient/1        - the merged survivor
+ *   5. GET  Patient/2        - active:false + replaced-by -> Patient/1
+ *
+ * Patients are created and read via Aidbox; $merge runs via mdmbox. Aidbox and
+ * mdmbox share one database, so resources created in one are visible to the
+ * other.
  */
 
 type JsonRecord = Record<string, any>;
@@ -22,9 +27,6 @@ type JsonResponse = {
 
 const PORT = parseInt(process.env.PORT || "3300", 10);
 
-// Patients are created and read via Aidbox; $merge runs via mdmbox. Aidbox and
-// mdmbox share the same database, so resources created in one are visible to the
-// other.
 const AIDBOX_URL = trimSlash(process.env.AIDBOX_URL || "http://localhost:8888");
 const PUBLIC_AIDBOX_URL = trimSlash(process.env.PUBLIC_AIDBOX_URL || "http://localhost:8888");
 const AIDBOX_AUTH = process.env.AIDBOX_AUTH || "Basic cm9vdDpyb290"; // root:root
@@ -32,6 +34,10 @@ const AIDBOX_AUTH = process.env.AIDBOX_AUTH || "Basic cm9vdDpyb290"; // root:roo
 const MDMBOX_URL = trimSlash(process.env.MDMBOX_URL || "http://localhost:3003");
 const PUBLIC_MDMBOX_URL = trimSlash(process.env.PUBLIC_MDMBOX_URL || "http://localhost:3003");
 const MDMBOX_AUTH = process.env.MDMBOX_AUTH || "Basic cm9vdDpyb290"; // root:root
+
+// The target survives the merge, the source is deactivated.
+const TARGET_ID = process.env.TARGET_ID || "1";
+const SOURCE_ID = process.env.SOURCE_ID || "2";
 
 const DIR = import.meta.dir;
 
@@ -100,12 +106,12 @@ function aidboxFhir(path: string, opts: { method?: string; body?: unknown } = {}
 }
 
 // ---------------------------------------------------------------------------
-// Sample patients (so the example is runnable with two clicks)
+// Sample patients (so the example is runnable with five clicks)
 // ---------------------------------------------------------------------------
 function targetPatient(): JsonRecord {
   return {
     resourceType: "Patient",
-    id: "merge-target-jane",
+    id: TARGET_ID,
     active: true,
     identifier: [{ system: "https://example.org/mrn", value: "MRN-1000" }],
     name: [{ use: "official", given: ["Jane"], family: "Doe" }],
@@ -119,7 +125,7 @@ function targetPatient(): JsonRecord {
 function sourcePatient(): JsonRecord {
   return {
     resourceType: "Patient",
-    id: "merge-source-jane",
+    id: SOURCE_ID,
     active: true,
     identifier: [{ system: "https://example.org/mrn", value: "MRN-2000" }],
     name: [{ use: "official", given: ["Jane"], family: "Doe" }],
@@ -130,19 +136,30 @@ function sourcePatient(): JsonRecord {
   };
 }
 
-async function seedPatients() {
-  const t = await aidboxFhir(`Patient/${targetPatient().id}`, { method: "PUT", body: targetPatient() });
-  const s = await aidboxFhir(`Patient/${sourcePatient().id}`, { method: "PUT", body: sourcePatient() });
+// Step 1 / Step 2: create a patient in Aidbox (PUT with explicit id = upsert).
+async function putPatient(patient: JsonRecord) {
+  const id = requiredId(patient, "patient");
+  const result = await aidboxFhir(`Patient/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: patient,
+  });
   return {
-    ok: t.ok && s.ok,
-    status: t.ok && s.ok ? 200 : 502,
-    target: { id: targetPatient().id, status: t.status, body: t.body },
-    source: { id: sourcePatient().id, status: s.status, body: s.body },
+    ok: result.ok,
+    status: result.status,
+    request: { method: "PUT", url: `Patient/${id}`, body: patient },
+    response: result.body,
   };
 }
 
-async function readPatient(id: string) {
-  return aidboxFhir(`Patient/${encodeURIComponent(id)}`);
+// Step 4 / Step 5: read a patient back from Aidbox.
+async function getPatient(id: string) {
+  const result = await aidboxFhir(`Patient/${encodeURIComponent(id)}`);
+  return {
+    ok: result.ok,
+    status: result.status,
+    request: { method: "GET", url: `Patient/${id}` },
+    response: result.body,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -211,47 +228,34 @@ function buildMergeParameters(opts: { source: string; target: string; entries: J
   };
 }
 
-// Page -> Bun -> mdmbox $merge.
+// Step 3: Page -> Bun -> mdmbox $merge.
 async function runMerge(input: JsonRecord) {
-  const sourceId = String(input.sourceId || "").trim();
-  const targetId = String(input.targetId || "").trim();
-  const preview = input.preview === true;
+  const sourceId = String(input.sourceId || SOURCE_ID).trim();
+  const targetId = String(input.targetId || TARGET_ID).trim();
   if (!sourceId || !targetId) {
     return { ok: false, status: 400, error: "Both source and target Patient ids are required." };
   }
 
-  const sourceRead = await readPatient(sourceId);
+  const sourceRead = await aidboxFhir(`Patient/${encodeURIComponent(sourceId)}`);
   if (!sourceRead.ok) return { ok: false, status: sourceRead.status, error: `Source Patient/${sourceId} not found in Aidbox`, response: sourceRead.body };
-  const targetRead = await readPatient(targetId);
+  const targetRead = await aidboxFhir(`Patient/${encodeURIComponent(targetId)}`);
   if (!targetRead.ok) return { ok: false, status: targetRead.status, error: `Target Patient/${targetId} not found in Aidbox`, response: targetRead.body };
 
   const plan = buildMergePlan(sourceRead.body as JsonRecord, targetRead.body as JsonRecord);
-  const body = buildMergeParameters({ source: plan.source, target: plan.target, entries: plan.entries, preview });
+  const body = buildMergeParameters({ source: plan.source, target: plan.target, entries: plan.entries, preview: false });
 
   const url = `${MDMBOX_URL}/api/$merge`;
   const started = performance.now();
   const result = await mdmbox("/api/$merge", { method: "POST", body });
   const elapsedMs = Math.round(performance.now() - started);
 
-  // After a real (non-preview) merge, read the source back to show it is inactive.
-  let sourceAfter: unknown = undefined;
-  if (result.ok && !preview) {
-    const after = await readPatient(sourceId);
-    if (after.ok) {
-      const r = after.body as JsonRecord;
-      sourceAfter = { id: r.id, active: r.active, link: r.link };
-    }
-  }
-
   return {
     ok: result.ok,
     status: result.status,
     via: url,
     elapsedMs,
-    plan: { deactivatedSource: plan.deactivatedSource, mergedTarget: plan.mergedTarget },
-    request: body,
+    request: { method: "POST", url: "/api/$merge", body },
     response: result.body,
-    sourceAfter,
   };
 }
 
@@ -402,26 +406,24 @@ const server = Bun.serve({
         publicAidboxUrl: PUBLIC_AIDBOX_URL,
         mdmboxUrl: MDMBOX_URL,
         publicMdmboxUrl: PUBLIC_MDMBOX_URL,
-        sampleSourceId: sourcePatient().id,
-        sampleTargetId: targetPatient().id,
+        targetId: TARGET_ID,
+        sourceId: SOURCE_ID,
       });
     }
 
-    if (pathname === "/api/seed" && req.method === "POST") {
+    // Step 1 & 2: POST (PUT/upsert) a patient into Aidbox.
+    if (pathname === "/api/put-patient" && req.method === "POST") {
       try {
-        const result = await seedPatients();
-        return Response.json(result, { status: result.ok ? 200 : 502 });
+        const which = url.searchParams.get("which");
+        const patient = which === "source" ? sourcePatient() : targetPatient();
+        const result = await putPatient(patient);
+        return Response.json(result, { status: result.ok ? 200 : result.status || 502 });
       } catch (e) {
         return Response.json({ ok: false, error: String(e) }, { status: 502 });
       }
     }
 
-    if (pathname === "/api/patient" && req.method === "GET") {
-      const id = url.searchParams.get("id") || "";
-      const result = await readPatient(id);
-      return Response.json(result, { status: result.ok ? 200 : result.status });
-    }
-
+    // Step 3: POST $merge.
     if (pathname === "/api/merge" && req.method === "POST") {
       try {
         const input = await req.json().catch(() => ({}));
@@ -432,18 +434,27 @@ const server = Bun.serve({
       }
     }
 
+    // Step 4 & 5: GET a patient back from Aidbox.
+    if (pathname === "/api/patient" && req.method === "GET") {
+      const id = url.searchParams.get("id") || "";
+      const result = await getPatient(id);
+      return Response.json(result, { status: result.ok ? 200 : result.status || 502 });
+    }
+
     return new Response("Not found", { status: 404 });
   },
 });
 
 console.log(`mdmbox merge-inactive example -> http://localhost:${server.port}`);
-console.log(`Aidbox: ${AIDBOX_URL}  (seed/read patients)`);
+console.log(`Aidbox: ${AIDBOX_URL}  (create/read patients)`);
 console.log(`mdmbox: ${MDMBOX_URL}  ($merge)`);
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 function renderPage(): string {
+  const targetJson = JSON.stringify(targetPatient(), null, 2);
+  const sourceJson = JSON.stringify(sourcePatient(), null, 2);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -465,69 +476,110 @@ function renderPage(): string {
     <header class="page-header">
       <h1 class="page-title">Run <code>$merge</code> that deactivates the source</h1>
       <p class="page-subtitle">
-        Create patients in Aidbox, then run mdmbox <code>$merge</code> over them
-        (Aidbox and mdmbox share one database). The plan
-        <strong>PUTs the source with <code>active:false</code></strong> and a
-        <code>replaced-by</code> link to the target &mdash; the duplicate is retired,
-        not deleted, so it stays queryable for audit/history.
+        Five steps: create two patients, run mdmbox <code>$merge</code>, then read both
+        back. The plan <strong>PUTs the source with <code>active:false</code></strong> and a
+        <code>replaced-by</code> link to the target &mdash; the duplicate is retired, not
+        deleted, so it stays queryable for audit/history. <code>Patient/${escapeHtml(TARGET_ID)}</code>
+        survives, <code>Patient/${escapeHtml(SOURCE_ID)}</code> is deactivated.
       </p>
     </header>
 
     <section class="cell">
       <div class="cell-header">
-        <span class="cell-num">Cell 1</span>
-        <span class="cell-title">Seed two sample patients in Aidbox (optional)</span>
-        <span class="cell-badge" id="badge-seed">idle</span>
+        <span class="cell-num">Step 1</span>
+        <span class="cell-title">POST <code>Patient/${escapeHtml(TARGET_ID)}</code> (target, survives)</span>
+        <span class="cell-badge" id="badge-1">idle</span>
       </div>
       <div class="cell-body">
-        <p class="muted">
-          Creates <code>${escapeHtml(targetPatient().id)}</code> (target) and
-          <code>${escapeHtml(sourcePatient().id)}</code> (source) in Aidbox so you have
-          something to merge. Skip this if you already have patients.
-        </p>
+        <p class="muted">Creates the surviving target patient in Aidbox.</p>
+        <details class="disclosure">
+          <summary>Request body</summary>
+          <pre class="code">${escapeHtml(targetJson)}</pre>
+        </details>
         <div class="actions">
-          <button class="btn btn-ghost" id="btn-seed">Seed sample patients</button>
-          <span class="spinner" id="spin-seed" hidden>Seeding...</span>
+          <button class="btn btn-primary" id="btn-1">POST Patient/${escapeHtml(TARGET_ID)}</button>
+          <span class="spinner" id="spin-1" hidden>Posting...</span>
         </div>
-        <div id="out-seed"></div>
+        <div id="out-1"></div>
       </div>
     </section>
 
     <section class="cell">
       <div class="cell-header">
-        <span class="cell-num">Cell 2</span>
-        <span class="cell-title">Run <code>$merge</code></span>
-        <span class="cell-badge" id="badge-merge">idle</span>
+        <span class="cell-num">Step 2</span>
+        <span class="cell-title">POST <code>Patient/${escapeHtml(SOURCE_ID)}</code> (source, duplicate)</span>
+        <span class="cell-badge" id="badge-2">idle</span>
       </div>
       <div class="cell-body">
-        <div class="field-row">
-          <div class="field">
-            <label for="f-source">Source Patient id (retired)</label>
-            <input id="f-source" value="${escapeHtml(sourcePatient().id)}" />
-          </div>
-          <div class="field">
-            <label for="f-target">Target Patient id (survives)</label>
-            <input id="f-target" value="${escapeHtml(targetPatient().id)}" />
-          </div>
-          <div class="field">
-            <label for="f-preview">Preview</label>
-            <select id="f-preview">
-              <option value="true">true (dry-run)</option>
-              <option value="false">false (apply)</option>
-            </select>
-          </div>
+        <p class="muted">Creates the duplicate source patient in Aidbox.</p>
+        <details class="disclosure">
+          <summary>Request body</summary>
+          <pre class="code">${escapeHtml(sourceJson)}</pre>
+        </details>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-2">POST Patient/${escapeHtml(SOURCE_ID)}</button>
+          <span class="spinner" id="spin-2" hidden>Posting...</span>
         </div>
-        <p class="hint">
-          The plan deactivates the source instead of deleting it. Use
-          <code>preview: true</code> to validate without writing.
+        <div id="out-2"></div>
+      </div>
+    </section>
+
+    <section class="cell">
+      <div class="cell-header">
+        <span class="cell-num">Step 3</span>
+        <span class="cell-title">POST <code>$merge</code></span>
+        <span class="cell-badge" id="badge-3">idle</span>
+      </div>
+      <div class="cell-body">
+        <p class="muted">
+          Merges <code>Patient/${escapeHtml(SOURCE_ID)}</code> into
+          <code>Patient/${escapeHtml(TARGET_ID)}</code>. The plan deactivates the source
+          (<code>active:false</code> + <code>replaced-by</code>) instead of deleting it.
         </p>
         <div class="actions">
-          <button class="btn btn-primary" id="btn-merge">Run $merge</button>
-          <button class="btn btn-ghost" id="btn-check-source">Read source after merge</button>
-          <span class="spinner" id="spin-merge" hidden>Merging...</span>
+          <button class="btn btn-primary" id="btn-3">POST $merge</button>
+          <span class="spinner" id="spin-3" hidden>Merging...</span>
         </div>
-        <div id="out-source-after"></div>
-        <div id="out-merge"></div>
+        <div id="out-3"></div>
+      </div>
+    </section>
+
+    <section class="cell">
+      <div class="cell-header">
+        <span class="cell-num">Step 4</span>
+        <span class="cell-title">GET <code>Patient/${escapeHtml(TARGET_ID)}</code> (merge result)</span>
+        <span class="cell-badge" id="badge-4">idle</span>
+      </div>
+      <div class="cell-body">
+        <p class="muted">
+          The survivor after the merge &mdash; data from both patients, with a
+          <code>replaces</code> link to <code>Patient/${escapeHtml(SOURCE_ID)}</code>.
+        </p>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-4">GET Patient/${escapeHtml(TARGET_ID)}</button>
+          <span class="spinner" id="spin-4" hidden>Reading...</span>
+        </div>
+        <div id="out-4"></div>
+      </div>
+    </section>
+
+    <section class="cell">
+      <div class="cell-header">
+        <span class="cell-num">Step 5</span>
+        <span class="cell-title">GET <code>Patient/${escapeHtml(SOURCE_ID)}</code> (<code>active: false</code>)</span>
+        <span class="cell-badge" id="badge-5">idle</span>
+      </div>
+      <div class="cell-body">
+        <p class="muted">
+          The retired source &mdash; <code>active:false</code> with a
+          <code>replaced-by</code> link to <code>Patient/${escapeHtml(TARGET_ID)}</code>. Still
+          queryable for audit/history.
+        </p>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-5">GET Patient/${escapeHtml(SOURCE_ID)}</button>
+          <span class="spinner" id="spin-5" hidden>Reading...</span>
+        </div>
+        <div id="out-5"></div>
       </div>
     </section>
   </main>
@@ -540,6 +592,8 @@ function renderPage(): string {
 function pageScript(): string {
   return `
 const $ = (id) => document.getElementById(id);
+const TARGET_ID = ${JSON.stringify(TARGET_ID)};
+const SOURCE_ID = ${JSON.stringify(SOURCE_ID)};
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -570,59 +624,37 @@ function renderOutput(hostId, payload, label) {
     '</div>';
 }
 
-$("btn-seed").addEventListener("click", async () => {
-  $("btn-seed").disabled = true;
-  $("spin-seed").hidden = false;
-  setBadge("badge-seed", "run", "seeding");
+// Generic "run a step" wrapper: toggles spinner + badge, renders the result.
+async function runStep(n, run, runningText, okText) {
+  $("btn-" + n).disabled = true;
+  $("spin-" + n).hidden = false;
+  setBadge("badge-" + n, "run", runningText);
   try {
-    const data = await requestJson("/api/seed", { method: "POST", body: "{}" });
-    renderOutput("out-seed", data, "seeded");
-    setBadge("badge-seed", data.ok ? "ok" : "err", data.ok ? "ready" : "failed");
+    const data = await run();
+    renderOutput("out-" + n, data, okText);
+    setBadge("badge-" + n, data.ok ? "ok" : "err", data.ok ? "done" : "failed");
   } catch (e) {
-    $("out-seed").innerHTML = '<div class="error-msg">' + escapeHtml(String(e)) + '</div>';
-    setBadge("badge-seed", "err", "failed");
+    $("out-" + n).innerHTML = '<div class="error-msg">' + escapeHtml(String(e)) + '</div>';
+    setBadge("badge-" + n, "err", "failed");
   } finally {
-    $("btn-seed").disabled = false;
-    $("spin-seed").hidden = true;
+    $("btn-" + n).disabled = false;
+    $("spin-" + n).hidden = true;
   }
-});
+}
 
-$("btn-merge").addEventListener("click", async () => {
-  const input = {
-    sourceId: $("f-source").value.trim(),
-    targetId: $("f-target").value.trim(),
-    preview: $("f-preview").value === "true",
-  };
-  $("btn-merge").disabled = true;
-  $("spin-merge").hidden = false;
-  $("out-source-after").innerHTML = "";
-  setBadge("badge-merge", "run", input.preview ? "previewing" : "merging");
-  try {
-    const data = await requestJson("/api/merge", { method: "POST", body: JSON.stringify(input) });
-    renderOutput("out-merge", data, input.preview ? "preview ok" : "merged");
-    if (data.sourceAfter) {
-      $("out-source-after").innerHTML =
-        '<div class="output"><div class="output-bar"><span class="status-ok">source after merge</span></div>' +
-        '<pre class="output-body">' + escapeHtml(JSON.stringify(data.sourceAfter, null, 2)) + '</pre></div>';
-    }
-    setBadge("badge-merge", data.ok ? "ok" : "err", data.ok ? (input.preview ? "preview ok" : "merged") : "failed");
-  } catch (e) {
-    $("out-merge").innerHTML = '<div class="error-msg">' + escapeHtml(String(e)) + '</div>';
-    setBadge("badge-merge", "err", "failed");
-  } finally {
-    $("btn-merge").disabled = false;
-    $("spin-merge").hidden = true;
-  }
-});
+$("btn-1").addEventListener("click", () =>
+  runStep(1, () => requestJson("/api/put-patient?which=target", { method: "POST", body: "{}" }), "posting", "created"));
 
-$("btn-check-source").addEventListener("click", async () => {
-  const id = $("f-source").value.trim();
-  const data = await requestJson("/api/patient?id=" + encodeURIComponent(id));
-  const r = data.body || data;
-  const slim = r && r.resourceType === "Patient" ? { id: r.id, active: r.active, link: r.link } : data;
-  $("out-source-after").innerHTML =
-    '<div class="output"><div class="output-bar"><span class="' + (data.ok ? "status-ok" : "status-err") + '">source ' + escapeHtml(id) + '</span></div>' +
-    '<pre class="output-body">' + escapeHtml(JSON.stringify(slim, null, 2)) + '</pre></div>';
-});
+$("btn-2").addEventListener("click", () =>
+  runStep(2, () => requestJson("/api/put-patient?which=source", { method: "POST", body: "{}" }), "posting", "created"));
+
+$("btn-3").addEventListener("click", () =>
+  runStep(3, () => requestJson("/api/merge", { method: "POST", body: JSON.stringify({ sourceId: SOURCE_ID, targetId: TARGET_ID }) }), "merging", "merged"));
+
+$("btn-4").addEventListener("click", () =>
+  runStep(4, () => requestJson("/api/patient?id=" + encodeURIComponent(TARGET_ID)), "reading", "merge result"));
+
+$("btn-5").addEventListener("click", () =>
+  runStep(5, () => requestJson("/api/patient?id=" + encodeURIComponent(SOURCE_ID)), "reading", "active: false"));
 `;
 }

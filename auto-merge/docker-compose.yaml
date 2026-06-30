@@ -138,8 +138,36 @@ services:
       MDMBOX_ACCESS_POLICY_ID: mdmbox-automerge-access
       MODEL_ID: patient-example
       WEBHOOK_SECRET: aidbox-to-bun-secret
-      # Endpoint Aidbox calls for AidboxTopicDestination webhook delivery.
-      WEBHOOK_ENDPOINT_URL: http://notebook:3300/webhooks/patient-created
+      # Endpoint Aidbox calls for AidboxTopicDestination webhook delivery —
+      # the standalone webhook server below, not the notebook UI.
+      WEBHOOK_ENDPOINT_URL: http://webhook:3301/webhooks/patient-created
+
+  # Standalone webhook server: Aidbox calls it on Patient/create, and it runs
+  # $match + $merge against mdmbox automatically. Self-contained (webhook.ts).
+  webhook:
+    image: oven/bun:1
+    pull_policy: every_4w
+    depends_on:
+      mdmbox:
+        condition: service_healthy
+      aidbox:
+        condition: service_healthy
+    ports:
+      - 3301:3301
+    working_dir: /app
+    volumes:
+      - ./:/app:ro
+    command: ["bun", "webhook.ts"]
+    environment:
+      WEBHOOK_PORT: "3301"
+      # In-network service names (containers talk to each other directly).
+      AIDBOX_URL: http://aidbox:8080
+      AIDBOX_AUTH: "Basic cm9vdDpyb290"   # root:root
+      MDMBOX_URL: http://mdmbox:3000
+      MDMBOX_CLIENT_ID: mdmbox-automerge-client
+      MDMBOX_CLIENT_SECRET: mdmbox-automerge-secret
+      MODEL_ID: patient-example
+      WEBHOOK_SECRET: aidbox-to-bun-secret
 
 volumes:
   aidbox_pg_data: {}
