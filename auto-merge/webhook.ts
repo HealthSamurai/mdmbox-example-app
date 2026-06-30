@@ -2,19 +2,9 @@
  * mdmbox-auto-merge-proxy - a tiny standalone Bun server.
  *
  * Aidbox calls this server (via AidboxTopicDestination) whenever a Patient is
- * created. The server then runs $match + $merge against mdmbox automatically:
+ * created. The server then runs $match + $merge against MDMbox automatically
+ * to search for duplicates and merge them automatically.
  *
- *   Aidbox  --POST /webhooks/patient-created-->  auto-merge proxy
- *   proxy   --POST /api/fhir/Patient/$match-->   mdmbox   (onlySingleMatch=true)
- *   proxy   --POST /api/$merge-------------->     mdmbox   (when mdmbox returns a match)
- *
- * It is self-contained: it carries its own $match + $merge logic and shares
- * nothing with notebook.ts. The notebook (notebook.ts) is the manual, stepwise
- * UI; this is the automatic, webhook-driven counterpart. Both run in the same
- * docker compose stack.
- *
- * The matching model is NOT created here — install it via the mdmbox welcome
- * setup. This server only references it by id (MODEL_ID).
  */
 
 type JsonRecord = Record<string, any>;

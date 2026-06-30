@@ -147,7 +147,7 @@ services:
       WEBHOOK_ENDPOINT_URL: http://proxy:3301/webhooks/patient-created
 
   # Standalone auto-merge proxy: Aidbox calls it on Patient/create, and it runs
-  # $match + $merge against mdmbox automatically. Self-contained (webhook.ts).
+  # $match + $merge against MDMbox.
   proxy:
     image: oven/bun:1
     pull_policy: always
