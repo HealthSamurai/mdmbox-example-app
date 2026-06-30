@@ -1,18 +1,7 @@
 /**
- * mdmbox-automerge-app - a single-page example served by Bun.
+ * mdmbox auto-merge notebook.
  *
- * Stepwise (no webhook/subscription — that lives in a separate app). You drive
- * the match + merge by hand, one button per call:
- *
- *   1. Setup           - register the MDMbox User/Client/AccessPolicy for this app
- *   2. POST existing   - seed the surviving Patient into Aidbox
- *   3. POST new        - create the incoming duplicate Patient into Aidbox
- *   4. POST $match     - ask MDMbox whether the new Patient matches an existing one
- *   5. POST $merge     - merge the new Patient (source) into the matched one (target)
- *   6. GET  result     - read the surviving Patient back after the merge
- *
- * The matching model is NOT created here — install it via the MDMbox welcome
- * setup. This notebook only references it by id (MODEL_ID).
+ * This UI presents one REST request per notebook step.
  */
 
 type JsonRecord = Record<string, any>;
@@ -33,21 +22,22 @@ const AIDBOX_AUTH = process.env.AIDBOX_AUTH || "Basic cm9vdDpyb290"; // root:roo
 
 const MDMBOX_URL = trimSlash(process.env.MDMBOX_URL || "http://localhost:3003");
 const PUBLIC_MDMBOX_URL = trimSlash(process.env.PUBLIC_MDMBOX_URL || "http://localhost:3003");
-const MDMBOX_ADMIN_AUTH = process.env.MDMBOX_ADMIN_AUTH || "Basic cm9vdDpyb290"; // root:root
 
 const MODEL_ID = process.env.MODEL_ID || "patient-example";
-const MATCH_RESULT_LIMIT = parseInt(process.env.MATCH_RESULT_LIMIT || "1", 10);
 
-const MDMBOX_USER_ID = process.env.MDMBOX_USER_ID || "mdmbox-automerge-user";
-const MDMBOX_USER_PASSWORD =
-  process.env.MDMBOX_USER_PASSWORD || "mdmbox-automerge-password";
-const MDMBOX_CLIENT_ID = process.env.MDMBOX_CLIENT_ID || "mdmbox-automerge-client";
-const MDMBOX_CLIENT_SECRET =
-  process.env.MDMBOX_CLIENT_SECRET || "mdmbox-automerge-secret";
-const MDMBOX_ACCESS_POLICY_ID =
-  process.env.MDMBOX_ACCESS_POLICY_ID || "mdmbox-automerge-access";
-const MDMBOX_APP_AUTH =
-  process.env.MDMBOX_APP_AUTH || basicAuth(MDMBOX_CLIENT_ID, MDMBOX_CLIENT_SECRET);
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "aidbox-to-bun-secret";
+const WEBHOOK_ENDPOINT_URL =
+  process.env.WEBHOOK_ENDPOINT_URL || "http://localhost:3301/webhooks/patient-created";
+const PROXY_URL = trimSlash(
+  process.env.PROXY_URL || originFromUrl(WEBHOOK_ENDPOINT_URL) || "http://localhost:3301",
+);
+const PUBLIC_PROXY_URL = trimSlash(process.env.PUBLIC_PROXY_URL || "http://localhost:3301");
+
+const TOPIC_ID = process.env.AIDBOX_TOPIC_ID || "mdmbox-patient-created";
+const TOPIC_URL =
+  process.env.AIDBOX_TOPIC_URL ||
+  `http://mdmbox.example/SubscriptionTopic/${TOPIC_ID}`;
+const DESTINATION_ID = process.env.AIDBOX_DESTINATION_ID || "mdmbox-automerge-webhook";
 
 const EXISTING_PATIENT_ID = process.env.EXISTING_PATIENT_ID || "main-jane-doe";
 const NEW_PATIENT_ID = process.env.NEW_PATIENT_ID || "incoming-jane-doe";
@@ -57,39 +47,54 @@ const DIR = import.meta.dir;
 // ---------------------------------------------------------------------------
 // Resource manifests
 // ---------------------------------------------------------------------------
-function mdmboxUser() {
+function aidboxSubscriptionTopic() {
   return {
-    resourceType: "User",
-    id: MDMBOX_USER_ID,
-    password: MDMBOX_USER_PASSWORD,
+    resourceType: "AidboxSubscriptionTopic",
+    id: TOPIC_ID,
+    url: TOPIC_URL,
+    status: "active",
+    trigger: [
+      {
+        resource: "Patient",
+        supportedInteraction: ["create"],
+      },
+    ],
   };
 }
 
-function mdmboxClient() {
+function aidboxTopicDestination() {
   return {
-    resourceType: "Client",
-    id: MDMBOX_CLIENT_ID,
-    secret: MDMBOX_CLIENT_SECRET,
-    grant_types: ["basic"],
-  };
-}
-
-function mdmboxAccessPolicy() {
-  return {
-    resourceType: "AccessPolicy",
-    id: MDMBOX_ACCESS_POLICY_ID,
-    engine: "allow",
-    description: "Allows the Bun auto-merge example client to call mdmbox APIs",
-    link: [{ reference: `Client/${MDMBOX_CLIENT_ID}` }],
+    resourceType: "AidboxTopicDestination",
+    id: DESTINATION_ID,
+    meta: {
+      profile: [
+        "http://aidbox.app/StructureDefinition/aidboxtopicdestination-webhook-at-least-once",
+      ],
+    },
+    status: "active",
+    kind: "webhook-at-least-once",
+    topic: TOPIC_URL,
+    content: "full-resource",
+    includeEntryAction: true,
+    includeVersionId: true,
+    parameter: [
+      {
+        name: "endpoint",
+        valueUrl: WEBHOOK_ENDPOINT_URL,
+      },
+      {
+        name: "header",
+        valueString: `Authorization: Bearer ${WEBHOOK_SECRET}`,
+      },
+    ],
   };
 }
 
 function setupManifest() {
   return {
-    mdmbox: {
-      user: mdmboxUser(),
-      client: mdmboxClient(),
-      accessPolicy: mdmboxAccessPolicy(),
+    aidbox: {
+      subscriptionTopic: aidboxSubscriptionTopic(),
+      topicDestination: aidboxTopicDestination(),
     },
   };
 }
@@ -138,86 +143,123 @@ async function aidboxFhir(
   });
 }
 
-async function mdmboxApi(
+async function proxyJson(
   path: string,
   opts: { method?: string; body?: unknown } = {},
 ): Promise<JsonResponse> {
-  return jsonRequest(`${MDMBOX_URL}${path.startsWith("/") ? path : `/${path}`}`, {
-    ...opts,
-    auth: MDMBOX_APP_AUTH,
-  });
+  return jsonRequest(`${PROXY_URL}${path.startsWith("/") ? path : `/${path}`}`, opts);
 }
 
-async function mdmboxAdmin(
-  path: string,
-  opts: { method?: string; body?: unknown } = {},
-): Promise<JsonResponse> {
-  return jsonRequest(`${MDMBOX_URL}${path.startsWith("/") ? path : `/${path}`}`, {
-    ...opts,
-    auth: MDMBOX_ADMIN_AUTH,
-  });
-}
-
-async function mdmboxIamUpsert(
-  resourceType: "User" | "Client",
-  id: string,
-  resource: JsonRecord,
-): Promise<JsonResponse> {
-  const path = `/api/iam/${resourceType}/${encodeURIComponent(id)}`;
-  const existing = await mdmboxAdmin(path);
-
-  if (existing.ok) {
-    return mdmboxAdmin(path, { method: "PUT", body: resource });
-  }
-
-  if (existing.status === 404) {
-    return mdmboxAdmin(`/api/iam/${resourceType}`, { method: "POST", body: resource });
-  }
-
-  return existing;
-}
-
-async function mdmboxServerFhir(
-  path: string,
-  opts: { method?: string; body?: unknown } = {},
-): Promise<JsonResponse> {
-  return mdmboxApi(`/fhir-server-api/${path.replace(/^\//, "")}`, opts);
-}
-
-// ---------------------------------------------------------------------------
-// Step 1: Setup MDMbox access for this app
-// ---------------------------------------------------------------------------
-async function registerSetupResources() {
-  const results: Record<string, JsonResponse> = {};
-
-  results.mdmboxUser = await mdmboxIamUpsert("User", MDMBOX_USER_ID, mdmboxUser());
-  results.mdmboxClient = await mdmboxIamUpsert("Client", MDMBOX_CLIENT_ID, mdmboxClient());
-
-  // In this compose stack Aidbox and mdmbox share the same database. The mdmbox
-  // IAM API manages User/Client, while AccessPolicy is still a shared Aidbox
-  // system resource linked to the mdmbox client.
-  results.mdmboxAccessPolicy = await aidboxFhir(
-    `AccessPolicy/${MDMBOX_ACCESS_POLICY_ID}`,
-    {
-      method: "PUT",
-      body: mdmboxAccessPolicy(),
-    },
-  );
-
-  // Smoke-test the client's credentials against the MDMbox API.
-  results.mdmboxClientAuthCheck = await mdmboxApi("/api/models");
-
-  const ok = Object.values(results).every((r) => r.ok);
+function wrapResponse(result: JsonResponse, request: unknown) {
   return {
-    ok,
-    status: ok ? 200 : 502,
-    resources: setupManifest(),
-    results,
+    ok: result.ok,
+    status: result.status,
+    request,
+    response: result.body,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Patient helpers
+// Notebook actions
+// ---------------------------------------------------------------------------
+async function putSubscriptionTopic() {
+  const topic = aidboxSubscriptionTopic();
+  const result = await aidboxFhir(`AidboxSubscriptionTopic/${TOPIC_ID}`, {
+    method: "PUT",
+    body: topic,
+  });
+  return wrapResponse(result, {
+    method: "PUT",
+    url: `${PUBLIC_AIDBOX_URL}/fhir/AidboxSubscriptionTopic/${TOPIC_ID}`,
+  });
+}
+
+async function postTopicDestination() {
+  const destination = aidboxTopicDestination();
+  const result = await aidboxFhir("AidboxTopicDestination", {
+    method: "POST",
+    body: destination,
+  });
+  return wrapResponse(result, {
+    method: "POST",
+    url: `${PUBLIC_AIDBOX_URL}/fhir/AidboxTopicDestination`,
+  });
+}
+
+async function seedExistingPatient() {
+  const patient = defaultExistingPatient();
+  const result = await aidboxFhir(`Patient/${encodeURIComponent(EXISTING_PATIENT_ID)}`, {
+    method: "PUT",
+    body: patient,
+  });
+
+  return {
+    ok: result.ok,
+    status: result.status,
+    patientId: EXISTING_PATIENT_ID,
+    request: {
+      method: "PUT",
+      url: `${PUBLIC_AIDBOX_URL}/fhir/Patient/${EXISTING_PATIENT_ID}`,
+    },
+    response: result.body,
+  };
+}
+
+async function createIncomingPatient() {
+  const patient = incomingPatientCreateBody();
+  const result = await aidboxFhir("Patient", {
+    method: "POST",
+    body: patient,
+  });
+  const response = isPlainObject(result.body) ? (result.body as JsonRecord) : {};
+  const patientId = response.id ? String(response.id) : "";
+
+  return {
+    ok: result.ok,
+    status: result.status,
+    patientId,
+    request: { method: "POST", url: `${PUBLIC_AIDBOX_URL}/fhir/Patient` },
+    response: result.body,
+  };
+}
+
+async function readProxyEvents(patientId: string) {
+  const id = String(patientId || "").trim();
+  if (!id) return { ok: false, status: 400, error: "Patient id is required." };
+
+  const proxy = await proxyJson(`/api/events?patientId=${encodeURIComponent(id)}`);
+  const events = Array.isArray((proxy.body as any)?.events)
+    ? ((proxy.body as any).events as JsonRecord[])
+    : [];
+  const flow = events[0] || null;
+  const targetId = targetIdFromFlow(flow);
+  const summary = summarizeFlow(flow, id, targetId);
+  return {
+    ok: proxy.ok,
+    status: proxy.status,
+    patientId: id,
+    targetId,
+    summary,
+    request: {
+      method: "GET",
+      url: `${PUBLIC_PROXY_URL}/api/events?patientId=${encodeURIComponent(id)}`,
+    },
+    response: proxy.body,
+  };
+}
+
+async function readAidboxPatient(id: string) {
+  const result = await aidboxFhir(`Patient/${encodeURIComponent(id)}`);
+  return {
+    ok: result.ok,
+    status: result.status,
+    request: { method: "GET", url: `${PUBLIC_AIDBOX_URL}/fhir/Patient/${id}` },
+    response: result.body,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Patient fixtures
 // ---------------------------------------------------------------------------
 function patientFromInput(input: JsonRecord, fallbackId: string): JsonRecord {
   const id = sanitizeId(input.id || fallbackId);
@@ -265,35 +307,6 @@ function patientFromInput(input: JsonRecord, fallbackId: string): JsonRecord {
   });
 }
 
-async function upsertAidboxPatient(patient: JsonRecord) {
-  const id = String(patient.id || "").trim();
-  if (!id) throw new Error("Patient.id is required");
-  const result = await aidboxFhir(`Patient/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    body: patient,
-  });
-  return {
-    ok: result.ok,
-    status: result.status,
-    request: { method: "PUT", url: `Patient/${id}`, body: patient },
-    response: result.body,
-  };
-}
-
-async function readAidboxPatient(id: string) {
-  const result = await aidboxFhir(`Patient/${encodeURIComponent(id)}`);
-  return {
-    ok: result.ok,
-    status: result.status,
-    request: { method: "GET", url: `Patient/${id}` },
-    response: result.body,
-  };
-}
-
-async function readMdmboxPatient(id: string) {
-  return mdmboxServerFhir(`Patient/${encodeURIComponent(id)}`);
-}
-
 function defaultExistingPatient() {
   return patientFromInput(
     {
@@ -315,10 +328,10 @@ function defaultExistingPatient() {
   );
 }
 
-function defaultNewPatient() {
+function defaultNewPatient(id = NEW_PATIENT_ID) {
   return patientFromInput(
     {
-      id: NEW_PATIENT_ID,
+      id,
       identifier: "MRN-2000",
       given: "Jane",
       family: "Doe",
@@ -328,186 +341,14 @@ function defaultNewPatient() {
       email: "jane.alt@example.org",
       city: "Boston",
     },
-    NEW_PATIENT_ID,
+    id,
   );
 }
 
-// ---------------------------------------------------------------------------
-// Step 4: $match
-// ---------------------------------------------------------------------------
-function buildMatchParameters(patient: JsonRecord) {
-  return {
-    resourceType: "Parameters",
-    parameter: [
-      { name: "modelId", valueString: MODEL_ID },
-      { name: "resource", resource: patient },
-      { name: "onlySingleMatch", valueBoolean: true },
-      { name: "count", valueInteger: MATCH_RESULT_LIMIT },
-    ],
-  };
-}
-
-async function runMatch(input: JsonRecord) {
-  const id = String(input.id || NEW_PATIENT_ID).trim();
-  if (!id) return { ok: false, status: 400, error: "Patient id is required." };
-
-  const read = await aidboxFhir(`Patient/${encodeURIComponent(id)}`);
-  if (!read.ok) return { ok: false, status: read.status, error: `Patient/${id} not found in Aidbox`, response: read.body };
-
-  const body = buildMatchParameters(read.body as JsonRecord);
-  const result = await mdmboxApi("/api/fhir/Patient/$match", { method: "POST", body });
-
-  const matched = firstMatch(result.body);
-  return {
-    ok: result.ok,
-    status: result.status,
-    matchedId: matched?.id,
-    total: (result.body as any)?.total,
-    request: { method: "POST", url: "/api/fhir/Patient/$match", body },
-    response: result.body,
-  };
-}
-
-function firstMatch(bundle: any): JsonRecord | null {
-  const entry = Array.isArray(bundle?.entry) ? bundle.entry[0] : undefined;
-  if (!entry) return null;
-  const resource = entry.resource || {};
-  const id = resource.id || extractIdFromFullUrl(entry.fullUrl || "");
-  return id ? { ...resource, id } : resource;
-}
-
-// ---------------------------------------------------------------------------
-// Step 5: $merge
-// ---------------------------------------------------------------------------
-function buildMergeParameters(opts: {
-  source: string;
-  target: string;
-  entries: JsonRecord[];
-  preview?: boolean;
-}) {
-  return {
-    resourceType: "Parameters",
-    parameter: [
-      { name: "source", valueReference: { reference: opts.source } },
-      { name: "target", valueReference: { reference: opts.target } },
-      { name: "preview", valueBoolean: opts.preview === true },
-      {
-        name: "plan",
-        resource: {
-          resourceType: "Bundle",
-          type: "transaction",
-          entry: opts.entries,
-        },
-      },
-    ],
-  };
-}
-
-function buildPrimitiveMergePlan(sourcePatient: JsonRecord, targetPatient: JsonRecord) {
-  const sourceId = requiredId(sourcePatient, "source patient");
-  const targetId = requiredId(targetPatient, "target patient");
-  const mergedTarget = mergeResourcePreferTarget(sourcePatient, targetPatient);
-
-  const putEntry: JsonRecord = {
-    resource: mergedTarget,
-    request: {
-      method: "PUT",
-      url: `Patient/${targetId}`,
-    },
-  };
-  const targetEtag = etag(targetPatient);
-  if (targetEtag) putEntry.request.ifMatch = targetEtag;
-
-  const deleteEntry: JsonRecord = {
-    request: {
-      method: "DELETE",
-      url: `Patient/${sourceId}`,
-    },
-  };
-  const sourceEtag = etag(sourcePatient);
-  if (sourceEtag) deleteEntry.request.ifMatch = sourceEtag;
-
-  return {
-    source: `Patient/${sourceId}`,
-    target: `Patient/${targetId}`,
-    entries: [putEntry, deleteEntry],
-    mergedTarget,
-  };
-}
-
-async function runMerge(input: JsonRecord) {
-  // source = the new (incoming) patient, target = the matched existing one.
-  const sourceId = String(input.sourceId || NEW_PATIENT_ID).trim();
-  const targetId = String(input.targetId || "").trim();
-  if (!sourceId || !targetId) {
-    return { ok: false, status: 400, error: "Both source and target Patient ids are required (run $match first)." };
-  }
-
-  const sourceRead = await aidboxFhir(`Patient/${encodeURIComponent(sourceId)}`);
-  if (!sourceRead.ok) return { ok: false, status: sourceRead.status, error: `Source Patient/${sourceId} not found in Aidbox`, response: sourceRead.body };
-  const targetRead = await readMdmboxPatient(targetId);
-  if (!targetRead.ok) return { ok: false, status: targetRead.status, error: `Target Patient/${targetId} not found in mdmbox`, response: targetRead.body };
-
-  const plan = buildPrimitiveMergePlan(sourceRead.body as JsonRecord, targetRead.body as JsonRecord);
-  const body = buildMergeParameters({ source: plan.source, target: plan.target, entries: plan.entries, preview: false });
-  const result = await mdmboxApi("/api/$merge", { method: "POST", body });
-
-  return {
-    ok: result.ok,
-    status: result.status,
-    source: plan.source,
-    target: plan.target,
-    request: { method: "POST", url: "/api/$merge", body },
-    response: result.body,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Merge strategy
-// ---------------------------------------------------------------------------
-function mergeResourcePreferTarget(source: JsonRecord, target: JsonRecord): JsonRecord {
-  const result: JsonRecord = deepClone(target);
-  for (const [key, sourceValue] of Object.entries(source)) {
-    if (["resourceType", "id", "meta"].includes(key)) continue;
-    result[key] = mergeValuePreferTarget(sourceValue, result[key]);
-  }
-  result.resourceType = target.resourceType || source.resourceType || "Patient";
-  result.id = target.id;
-  if (target.meta) result.meta = target.meta;
-  return compact(result);
-}
-
-function mergeValuePreferTarget(sourceValue: any, targetValue: any): any {
-  if (Array.isArray(sourceValue) || Array.isArray(targetValue)) {
-    return unionUnique(
-      Array.isArray(targetValue) ? targetValue : [],
-      Array.isArray(sourceValue) ? sourceValue : [],
-    );
-  }
-
-  if (isPlainObject(sourceValue) && isPlainObject(targetValue)) {
-    const result: JsonRecord = deepClone(targetValue);
-    for (const [key, value] of Object.entries(sourceValue)) {
-      result[key] = mergeValuePreferTarget(value, result[key]);
-    }
-    return compact(result);
-  }
-
-  if (isFilled(targetValue)) return targetValue;
-  return deepClone(sourceValue);
-}
-
-function unionUnique(targetItems: any[], sourceItems: any[]) {
-  const seen = new Set<string>();
-  const result: any[] = [];
-  for (const item of [...targetItems, ...sourceItems]) {
-    if (!isFilled(item)) continue;
-    const key = stableStringify(item);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(deepClone(item));
-  }
-  return result;
+function incomingPatientCreateBody() {
+  const patient = defaultNewPatient(NEW_PATIENT_ID);
+  delete patient.id;
+  return patient;
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +356,14 @@ function unionUnique(targetItems: any[], sourceItems: any[]) {
 // ---------------------------------------------------------------------------
 function trimSlash(s: string) {
   return s.replace(/\/$/, "");
+}
+
+function originFromUrl(raw: string) {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return "";
+  }
 }
 
 function safeJson(text: string): unknown {
@@ -526,18 +375,6 @@ function safeJson(text: string): unknown {
   }
 }
 
-function basicAuth(id: string, secret: string) {
-  return `Basic ${btoa(`${id}:${secret}`)}`;
-}
-
-function sanitizeId(id: string) {
-  return String(id)
-    .trim()
-    .replace(/[^A-Za-z0-9\-.]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 function splitGiven(value: unknown) {
   return String(value || "")
     .trim()
@@ -545,20 +382,144 @@ function splitGiven(value: unknown) {
     .filter(Boolean);
 }
 
-function requiredId(resource: JsonRecord, label: string) {
-  const id = String(resource?.id || "").trim();
-  if (!id) throw new Error(`${label} must have id`);
-  return id;
+function sanitizeId(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
-function extractIdFromFullUrl(fullUrl: string) {
-  const parts = String(fullUrl || "").split("/");
-  return parts[parts.length - 1] || "";
+function targetIdFromFlow(flow: JsonRecord | null) {
+  const matchedId = flow?.matchedPatient?.id;
+  if (matchedId) return String(matchedId);
+  const mergedId = flow?.mergedPatient?.id;
+  if (mergedId) return String(mergedId);
+
+  const targetParam = Array.isArray(flow?.mergeRequest?.parameter)
+    ? flow.mergeRequest.parameter.find((p: JsonRecord) => p?.name === "target")
+    : undefined;
+  const reference = targetParam?.valueReference?.reference;
+  return typeof reference === "string" ? reference.replace(/^Patient\//, "") : undefined;
 }
 
-function etag(resource: JsonRecord) {
-  const versionId = resource?.meta?.versionId;
-  return versionId ? `W/"${versionId}"` : undefined;
+function summarizeFlow(flow: JsonRecord | null, patientId: string, targetId?: string) {
+  if (!flow) {
+    return {
+      status: "waiting",
+      source: `Patient/${patientId}`,
+    };
+  }
+
+  return compact({
+    status: typeof flow.status === "string" ? flow.status : "received",
+    source: `Patient/${patientId}`,
+    target: targetId ? `Patient/${targetId}` : undefined,
+    startedAt: flow.startedAt,
+    updatedAt: flow.updatedAt,
+    match: summarizeMatch(flow),
+    merge: summarizeMerge(flow),
+    mergedPatient: summarizePatient(flow.mergedPatient),
+    steps: summarizeSteps(flow),
+  });
+}
+
+function summarizeSteps(flow: JsonRecord) {
+  return arrayRecords(flow.steps).map((step) =>
+    compact({
+      at: step.at,
+      label: step.label,
+      ok: step.ok,
+      details: step.details,
+    }),
+  );
+}
+
+function summarizeMatch(flow: JsonRecord) {
+  const matchResponse = isPlainObject(flow.matchResponse) ? flow.matchResponse : {};
+  const entries = arrayRecords(matchResponse.entry);
+  const first = entries[0] || {};
+  const search = isPlainObject(first.search) ? first.search : {};
+  const searchExtensions = arrayRecords(search.extension);
+  const detailsExtension = searchExtensions.find(
+    (ext) => ext.url === "https://mdmbox.health-samurai.io/fhir/StructureDefinition/match-details",
+  );
+  const details: JsonRecord = {};
+
+  for (const item of arrayRecords(detailsExtension?.extension)) {
+    const key = typeof item.url === "string" ? item.url : "";
+    const value = scalarExtensionValue(item);
+    if (key && value !== undefined) details[key] = value;
+  }
+
+  return compact({
+    total: matchResponse.total,
+    entries: entries.length,
+    targetId: isPlainObject(first.resource) ? first.resource.id : undefined,
+    score: roundScore(search.score),
+    grade: scalarExtensionValue(
+      searchExtensions.find((ext) => ext.url === "http://hl7.org/fhir/StructureDefinition/match-grade"),
+    ),
+    weight: scalarExtensionValue(
+      searchExtensions.find(
+        (ext) => ext.url === "https://mdmbox.health-samurai.io/fhir/StructureDefinition/match-weight",
+      ),
+    ),
+    details,
+  });
+}
+
+function summarizeMerge(flow: JsonRecord) {
+  const mergedPatient = isPlainObject(flow.mergedPatient) ? flow.mergedPatient : {};
+  return compact({
+    status: flow.status,
+    outcome: mergeOutcomeText(flow.mergeResponse),
+    targetId: mergedPatient.id,
+    versionId: isPlainObject(mergedPatient.meta) ? mergedPatient.meta.versionId : undefined,
+  });
+}
+
+function summarizePatient(value: unknown) {
+  if (!isPlainObject(value)) return undefined;
+  return compact({
+    id: value.id,
+    versionId: isPlainObject(value.meta) ? value.meta.versionId : undefined,
+    identifiers: arrayRecords(value.identifier).map((identifier) => identifier.value).filter(Boolean),
+    phones: arrayRecords(value.telecom)
+      .filter((telecom) => telecom.system === "phone")
+      .map((telecom) => telecom.value)
+      .filter(Boolean),
+    emails: arrayRecords(value.telecom)
+      .filter((telecom) => telecom.system === "email")
+      .map((telecom) => telecom.value)
+      .filter(Boolean),
+    addressCount: Array.isArray(value.address) ? value.address.length : undefined,
+  });
+}
+
+function mergeOutcomeText(value: unknown) {
+  if (!isPlainObject(value)) return undefined;
+  const outcomeParam = arrayRecords(value.parameter).find((param) => param.name === "outcome");
+  const outcome = isPlainObject(outcomeParam?.resource) ? outcomeParam.resource : {};
+  const issue = arrayRecords(outcome.issue)[0] || {};
+  const details = isPlainObject(issue.details) ? issue.details : {};
+  return typeof details.text === "string" ? details.text : undefined;
+}
+
+function scalarExtensionValue(value: unknown) {
+  if (!isPlainObject(value)) return undefined;
+  for (const key of ["valueCode", "valueDecimal", "valueInteger", "valueString", "valueBoolean"]) {
+    if (value[key] !== undefined) return value[key];
+  }
+  return undefined;
+}
+
+function roundScore(value: unknown) {
+  return typeof value === "number" ? Math.round(value * 1_000_000) / 1_000_000 : value;
+}
+
+function arrayRecords(value: unknown): JsonRecord[] {
+  return Array.isArray(value) ? value.filter(isPlainObject) : [];
 }
 
 function isPlainObject(value: unknown): value is JsonRecord {
@@ -586,22 +547,6 @@ function compact<T>(value: T): T {
     return result as T;
   }
   return value;
-}
-
-function deepClone<T>(value: T): T {
-  if (value === undefined) return value;
-  return JSON.parse(JSON.stringify(value));
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  if (isPlainObject(value)) {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function escapeHtml(s: string): string {
@@ -637,67 +582,61 @@ const server = Bun.serve({
         publicAidboxUrl: PUBLIC_AIDBOX_URL,
         mdmboxUrl: MDMBOX_URL,
         publicMdmboxUrl: PUBLIC_MDMBOX_URL,
+        proxyUrl: PROXY_URL,
+        publicProxyUrl: PUBLIC_PROXY_URL,
+        webhookEndpointUrl: WEBHOOK_ENDPOINT_URL,
         modelId: MODEL_ID,
-        mdmboxClientId: MDMBOX_CLIENT_ID,
         existingPatientId: EXISTING_PATIENT_ID,
-        newPatientId: NEW_PATIENT_ID,
+        incomingPatientIdPrefix: NEW_PATIENT_ID,
         resources: setupManifest(),
       });
     }
 
-    // Step 1: setup MDMbox access for this app.
-    if (pathname === "/api/setup" && req.method === "POST") {
+    if (pathname === "/api/subscription-topic" && req.method === "POST") {
       try {
-        const result = await registerSetupResources();
-        return Response.json(result, { status: result.ok ? 200 : 502 });
+        const result = await putSubscriptionTopic();
+        return Response.json(result, { status: result.ok ? 200 : result.status || 502 });
       } catch (e) {
         return Response.json({ ok: false, error: String(e) }, { status: 502 });
       }
     }
 
-    // Step 2: POST the existing (surviving) patient into Aidbox.
+    if (pathname === "/api/topic-destination" && req.method === "POST") {
+      try {
+        const result = await postTopicDestination();
+        return Response.json(result, { status: result.ok ? 200 : result.status || 502 });
+      } catch (e) {
+        return Response.json({ ok: false, error: String(e) }, { status: 502 });
+      }
+    }
+
     if (pathname === "/api/existing-patient" && req.method === "POST") {
       try {
-        const result = await upsertAidboxPatient(defaultExistingPatient());
+        const result = await seedExistingPatient();
         return Response.json(result, { status: result.ok ? 200 : result.status || 502 });
       } catch (e) {
         return Response.json({ ok: false, error: String(e) }, { status: 502 });
       }
     }
 
-    // Step 3: POST the new (incoming, duplicate) patient into Aidbox.
-    if (pathname === "/api/new-patient" && req.method === "POST") {
+    if (pathname === "/api/incoming-patient" && req.method === "POST") {
       try {
-        const result = await upsertAidboxPatient(defaultNewPatient());
+        const result = await createIncomingPatient();
         return Response.json(result, { status: result.ok ? 200 : result.status || 502 });
       } catch (e) {
         return Response.json({ ok: false, error: String(e) }, { status: 502 });
       }
     }
 
-    // Step 4: POST $match for the new patient.
-    if (pathname === "/api/match" && req.method === "POST") {
+    if (pathname === "/api/proxy-events" && req.method === "GET") {
       try {
-        const input = await req.json().catch(() => ({}));
-        const result = await runMatch(input);
+        const result = await readProxyEvents(url.searchParams.get("patientId") || "");
         return Response.json(result, { status: (result as any).ok ? 200 : (result as any).status || 502 });
       } catch (e) {
         return Response.json({ ok: false, error: String(e) }, { status: 502 });
       }
     }
 
-    // Step 5: POST $merge (new patient -> matched patient).
-    if (pathname === "/api/merge" && req.method === "POST") {
-      try {
-        const input = await req.json().catch(() => ({}));
-        const result = await runMerge(input);
-        return Response.json(result, { status: (result as any).ok ? 200 : (result as any).status || 502 });
-      } catch (e) {
-        return Response.json({ ok: false, error: String(e) }, { status: 502 });
-      }
-    }
-
-    // Step 6: GET a patient back from Aidbox.
     if (pathname === "/api/patient" && req.method === "GET") {
       const id = url.searchParams.get("id") || "";
       const result = await readAidboxPatient(id);
@@ -708,23 +647,31 @@ const server = Bun.serve({
   },
 });
 
-console.log(`mdmbox auto-merge example -> http://localhost:${server.port}`);
+console.log(`mdmbox auto-merge notebook -> http://localhost:${server.port}`);
 console.log(`Aidbox:  ${AIDBOX_URL}`);
 console.log(`mdmbox:  ${MDMBOX_URL}`);
+console.log(`proxy:   ${PROXY_URL}`);
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 function renderPage(): string {
-  const manifest = JSON.stringify(setupManifest(), null, 2);
+  const topicJson = JSON.stringify(aidboxSubscriptionTopic(), null, 2);
+  const destinationJson = JSON.stringify(aidboxTopicDestination(), null, 2);
   const existingJson = JSON.stringify(defaultExistingPatient(), null, 2);
-  const newJson = JSON.stringify(defaultNewPatient(), null, 2);
+  const newJson = JSON.stringify(incomingPatientCreateBody(), null, 2);
+  const topicUrl = `${PUBLIC_AIDBOX_URL}/fhir/AidboxSubscriptionTopic/${TOPIC_ID}`;
+  const destinationUrl = `${PUBLIC_AIDBOX_URL}/fhir/AidboxTopicDestination`;
+  const existingUrl = `${PUBLIC_AIDBOX_URL}/fhir/Patient/${EXISTING_PATIENT_ID}`;
+  const incomingUrl = `${PUBLIC_AIDBOX_URL}/fhir/Patient`;
+  const eventsUrl = `${PUBLIC_PROXY_URL}/api/events?patientId={id}`;
+  const patientUrl = `${PUBLIC_AIDBOX_URL}/fhir/Patient/{id}`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>mdmbox - match + merge</title>
+  <title>mdmbox - auto merge</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
@@ -733,44 +680,34 @@ function renderPage(): string {
 <body>
   <nav class="navbar">
     <a class="navbar-brand" href="/"><span class="dot"></span><span>mdmbox &times; Aidbox</span></a>
-    <span class="navbar-meta">model: ${escapeHtml(MODEL_ID)}</span>
+    <span class="navbar-meta">auto-merge proxy</span>
   </nav>
 
   <main class="page">
     <header class="page-header">
-      <h1 class="page-title">Match &amp; merge a duplicate Patient, step by step</h1>
+      <h1 class="page-title">Auto-merge REST notebook</h1>
       <p class="page-subtitle">
-        Create two similar patients in Aidbox, ask mdmbox <code>$match</code> whether they
-        are the same person, then <code>$merge</code> the new one into the existing record.
-        Each step is one explicit API call. The matching model
-        (<code>${escapeHtml(MODEL_ID)}</code>) is installed separately via the mdmbox welcome
-        setup; this notebook only references it.
+        Run the requests in order.
       </p>
     </header>
 
     <section class="cell">
       <div class="cell-header">
         <span class="cell-num">Step 1</span>
-        <span class="cell-title">Setup mdmbox access for this app</span>
+        <span class="cell-title"><code>PUT ${escapeHtml(topicUrl)}</code></span>
         <span class="cell-badge" id="badge-1">idle</span>
       </div>
       <div class="cell-body">
-        <div class="key-grid">
-          <div><span>Aidbox</span><code>${escapeHtml(PUBLIC_AIDBOX_URL)}</code></div>
-          <div><span>mdmbox</span><code>${escapeHtml(PUBLIC_MDMBOX_URL)}</code></div>
-          <div><span>model</span><code>${escapeHtml(MODEL_ID)}</code></div>
-        </div>
         <p class="muted">
-          Creates <code>User</code>, <code>Client</code> and an <code>AccessPolicy</code> so this
-          app can call mdmbox, then smoke-tests the client credentials.
+          Create a subscription topic for the <code>Patient/create</code> event.
         </p>
         <details class="disclosure">
-          <summary>Resources created by setup</summary>
-          <pre class="code">${escapeHtml(manifest)}</pre>
+          <summary>Body</summary>
+          <pre class="code">${escapeHtml(topicJson)}</pre>
         </details>
         <div class="actions">
-          <button class="btn btn-primary" id="btn-1">Setup resources</button>
-          <span class="spinner" id="spin-1" hidden>Working...</span>
+          <button class="btn btn-primary" id="btn-1">Send request</button>
+          <span class="spinner" id="spin-1" hidden>Sending...</span>
         </div>
         <div id="out-1"></div>
       </div>
@@ -779,18 +716,20 @@ function renderPage(): string {
     <section class="cell">
       <div class="cell-header">
         <span class="cell-num">Step 2</span>
-        <span class="cell-title">POST <code>Patient/${escapeHtml(EXISTING_PATIENT_ID)}</code> (existing, survives)</span>
+        <span class="cell-title"><code>POST ${escapeHtml(destinationUrl)}</code></span>
         <span class="cell-badge" id="badge-2">idle</span>
       </div>
       <div class="cell-body">
-        <p class="muted">Seeds the existing patient that the new one should match.</p>
+        <p class="muted">
+          Create a webhook destination for that topic.
+        </p>
         <details class="disclosure">
-          <summary>Request body</summary>
-          <pre class="code">${escapeHtml(existingJson)}</pre>
+          <summary>Body</summary>
+          <pre class="code">${escapeHtml(destinationJson)}</pre>
         </details>
         <div class="actions">
-          <button class="btn btn-primary" id="btn-2">POST existing Patient</button>
-          <span class="spinner" id="spin-2" hidden>Posting...</span>
+          <button class="btn btn-primary" id="btn-2">Send request</button>
+          <span class="spinner" id="spin-2" hidden>Sending...</span>
         </div>
         <div id="out-2"></div>
       </div>
@@ -799,18 +738,20 @@ function renderPage(): string {
     <section class="cell">
       <div class="cell-header">
         <span class="cell-num">Step 3</span>
-        <span class="cell-title">POST <code>Patient/${escapeHtml(NEW_PATIENT_ID)}</code> (new, duplicate)</span>
+        <span class="cell-title"><code>PUT ${escapeHtml(existingUrl)}</code></span>
         <span class="cell-badge" id="badge-3">idle</span>
       </div>
       <div class="cell-body">
-        <p class="muted">Creates the incoming duplicate that we will match and merge.</p>
+        <p class="muted">
+          Create the existing Patient that should survive the merge.
+        </p>
         <details class="disclosure">
-          <summary>Request body</summary>
-          <pre class="code">${escapeHtml(newJson)}</pre>
+          <summary>Body</summary>
+          <pre class="code">${escapeHtml(existingJson)}</pre>
         </details>
         <div class="actions">
-          <button class="btn btn-primary" id="btn-3">POST new Patient</button>
-          <span class="spinner" id="spin-3" hidden>Posting...</span>
+          <button class="btn btn-primary" id="btn-3">Send request</button>
+          <span class="spinner" id="spin-3" hidden>Sending...</span>
         </div>
         <div id="out-3"></div>
       </div>
@@ -819,17 +760,20 @@ function renderPage(): string {
     <section class="cell">
       <div class="cell-header">
         <span class="cell-num">Step 4</span>
-        <span class="cell-title">POST <code>$match</code></span>
+        <span class="cell-title"><code>POST ${escapeHtml(incomingUrl)}</code></span>
         <span class="cell-badge" id="badge-4">idle</span>
       </div>
       <div class="cell-body">
         <p class="muted">
-          Asks mdmbox whether <code>Patient/${escapeHtml(NEW_PATIENT_ID)}</code> matches an
-          existing patient (<code>onlySingleMatch</code>). The matched id feeds Step 5.
+          Create a new duplicate Patient in Aidbox.
         </p>
+        <details class="disclosure">
+          <summary>Body</summary>
+          <pre class="code">${escapeHtml(newJson)}</pre>
+        </details>
         <div class="actions">
-          <button class="btn btn-primary" id="btn-4">POST $match</button>
-          <span class="spinner" id="spin-4" hidden>Matching...</span>
+          <button class="btn btn-primary" id="btn-4">Send request</button>
+          <span class="spinner" id="spin-4" hidden>Sending...</span>
         </div>
         <div id="out-4"></div>
       </div>
@@ -838,27 +782,22 @@ function renderPage(): string {
     <section class="cell">
       <div class="cell-header">
         <span class="cell-num">Step 5</span>
-        <span class="cell-title">POST <code>$merge</code></span>
+        <span class="cell-title"><code>GET ${escapeHtml(eventsUrl)}</code></span>
         <span class="cell-badge" id="badge-5">idle</span>
       </div>
       <div class="cell-body">
         <p class="muted">
-          Merges the new patient (source) into the matched patient (target). Run Step 4 first
-          so the matched id is known.
+          Read proxy events for the Patient created in Step 4.
         </p>
-        <div class="field-row">
+        <div class="field-row one">
           <div class="field">
-            <label for="f-source">Source id (new)</label>
-            <input id="f-source" value="${escapeHtml(NEW_PATIENT_ID)}" />
-          </div>
-          <div class="field">
-            <label for="f-target">Target id (matched)</label>
-            <input id="f-target" placeholder="run $match first" />
+            <label for="f-patient">Incoming Patient id</label>
+            <input id="f-patient" placeholder="created in Step 4" />
           </div>
         </div>
         <div class="actions">
-          <button class="btn btn-primary" id="btn-5">POST $merge</button>
-          <span class="spinner" id="spin-5" hidden>Merging...</span>
+          <button class="btn btn-primary" id="btn-5">Send request</button>
+          <span class="spinner" id="spin-5" hidden>Sending...</span>
         </div>
         <div id="out-5"></div>
       </div>
@@ -867,20 +806,22 @@ function renderPage(): string {
     <section class="cell">
       <div class="cell-header">
         <span class="cell-num">Step 6</span>
-        <span class="cell-title">GET the merged Patient</span>
+        <span class="cell-title"><code>GET ${escapeHtml(patientUrl)}</code></span>
         <span class="cell-badge" id="badge-6">idle</span>
       </div>
       <div class="cell-body">
-        <p class="muted">Reads the surviving (target) patient back after the merge.</p>
-        <div class="field-row">
+        <p class="muted">
+          Read the merged target Patient from Aidbox.
+        </p>
+        <div class="field-row one">
           <div class="field">
-            <label for="f-result">Patient id</label>
-            <input id="f-result" placeholder="target id from $merge" />
+            <label for="f-target">Merged target id</label>
+            <input id="f-target" placeholder="from Step 5 response" />
           </div>
         </div>
         <div class="actions">
-          <button class="btn btn-primary" id="btn-6">GET Patient</button>
-          <span class="spinner" id="spin-6" hidden>Reading...</span>
+          <button class="btn btn-primary" id="btn-6">Send request</button>
+          <span class="spinner" id="spin-6" hidden>Sending...</span>
         </div>
         <div id="out-6"></div>
       </div>
@@ -895,7 +836,6 @@ function renderPage(): string {
 function pageScript(): string {
   return `
 const $ = (id) => document.getElementById(id);
-const NEW_PATIENT_ID = ${JSON.stringify(NEW_PATIENT_ID)};
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -914,19 +854,128 @@ function setBadge(id, state, text) {
   el.textContent = text;
 }
 
-function renderOutput(hostId, payload, label) {
+function outputHtml(payload, label) {
   const ok = payload && payload.ok;
   const status = payload && payload.status;
-  $(hostId).innerHTML =
+  return (
     '<div class="output">' +
       '<div class="output-bar">' +
-        '<span class="' + (ok ? "status-ok" : "status-err") + '">' + (ok ? (label || "OK") : "HTTP " + (status ?? "error")) + '</span>' +
+        '<span class="' + (ok ? "status-ok" : "status-err") + '">' + (ok ? (label || "OK") : "HTTP " + (status == null ? "error" : status)) + '</span>' +
       '</div>' +
       '<pre class="output-body">' + escapeHtml(JSON.stringify(payload, null, 2)) + '</pre>' +
-    '</div>';
+    '</div>'
+  );
 }
 
-// Generic "run a step" wrapper: toggles spinner + badge, renders the result.
+function renderOutput(hostId, payload, label) {
+  $(hostId).innerHTML = outputHtml(payload, label);
+}
+
+function renderProxyEventsOutput(hostId, payload) {
+  const label = payload && payload.targetId ? "full response, target " + payload.targetId : "full response";
+  if (!payload || !payload.ok) {
+    renderOutput(hostId, payload, label);
+    return;
+  }
+  $(hostId).innerHTML = proxySummaryHtml(payload) + outputHtml(payload, label);
+}
+
+function proxySummaryHtml(payload) {
+  const summary = payload.summary || {};
+  const match = summary.match || {};
+  const merge = summary.merge || {};
+  const patient = summary.mergedPatient || {};
+  const steps = Array.isArray(summary.steps) ? summary.steps : [];
+  const status = summary.status || "waiting";
+  const matchText = match.total == null ? "not returned" : String(match.total) + " match" + (match.total === 1 ? "" : "es");
+  const mergeText = merge.versionId ? "version " + merge.versionId : displayValue(merge.status);
+
+  return (
+    '<div class="flow-card">' +
+      '<div class="flow-head">' +
+        '<span class="grade ' + cssToken(status) + '">' + escapeHtml(status) + '</span>' +
+        '<code>' + escapeHtml(summary.source || ("Patient/" + (payload.patientId || ""))) + '</code>' +
+        '<span class="flow-arrow">to</span>' +
+        '<code>' + escapeHtml(summary.target || (payload.targetId ? "Patient/" + payload.targetId : "waiting")) + '</code>' +
+      '</div>' +
+      '<div class="key-grid">' +
+        summaryCell("Match", matchText) +
+        summaryCell("Grade", match.grade || "n/a") +
+        summaryCell("Score", match.score == null ? "n/a" : match.score) +
+        summaryCell("$merge", mergeText) +
+      '</div>' +
+      renderFlowSteps(steps) +
+      renderMatchDetails(match.details) +
+      renderPills("Merged identifiers", patient.identifiers) +
+      renderPills("Merged phones", patient.phones) +
+      renderPills("Merged emails", patient.emails) +
+      (merge.outcome ? '<p class="flow-outcome">' + escapeHtml(merge.outcome) + '</p>' : '') +
+    '</div>'
+  );
+}
+
+function summaryCell(label, value) {
+  const text = displayValue(value);
+  return '<div><span>' + escapeHtml(label) + '</span><code title="' + escapeHtml(text) + '">' + escapeHtml(text) + '</code></div>';
+}
+
+function renderFlowSteps(steps) {
+  if (!steps.length) return '<p class="muted flow-detail">No proxy event has been recorded yet.</p>';
+  return (
+    '<ol class="flow-steps">' +
+      steps.map((step) => {
+        const details = step.details
+          ? '<pre class="flow-step-details">' + escapeHtml(JSON.stringify(step.details, null, 2)) + '</pre>'
+          : '';
+        return (
+          '<li class="flow-step ' + (step.ok === false ? "err" : "ok") + '">' +
+            '<span class="flow-step-dot"></span>' +
+            '<div>' +
+              '<div class="flow-step-title">' + escapeHtml(step.label || "step") + '</div>' +
+              '<div class="flow-step-time">' + escapeHtml(step.at || "") + '</div>' +
+              details +
+            '</div>' +
+          '</li>'
+        );
+      }).join('') +
+    '</ol>'
+  );
+}
+
+function renderMatchDetails(details) {
+  const keys = details && typeof details === "object" ? Object.keys(details) : [];
+  if (!keys.length) return '';
+  return (
+    '<div class="flow-detail">' +
+      '<div class="flow-step-title">Match weights</div>' +
+      '<div class="pill-list">' +
+        keys.map((key) => '<span class="pill"><b>' + escapeHtml(key) + '</b> ' + escapeHtml(displayValue(details[key])) + '</span>').join('') +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function renderPills(title, values) {
+  if (!Array.isArray(values) || !values.length) return '';
+  return (
+    '<div class="flow-detail">' +
+      '<div class="flow-step-title">' + escapeHtml(title) + '</div>' +
+      '<div class="pill-list">' +
+        values.map((value) => '<span class="pill">' + escapeHtml(displayValue(value)) + '</span>').join('') +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function displayValue(value) {
+  if (value === undefined || value === null || value === "") return "n/a";
+  return String(value);
+}
+
+function cssToken(value) {
+  return String(value || "unknown").toLowerCase().replace(/[^a-z0-9-]+/g, "-") || "unknown";
+}
+
 async function runStep(n, run, runningText, okText) {
   $("btn-" + n).disabled = true;
   $("spin-" + n).hidden = false;
@@ -946,42 +995,81 @@ async function runStep(n, run, runningText, okText) {
   return data;
 }
 
+async function runProxyEvents() {
+  const patientId = $("f-patient").value.trim();
+  if (!patientId) {
+    $("out-5").innerHTML = '<div class="error-msg">Run Step 4 first, or paste an incoming Patient id.</div>';
+    setBadge("badge-5", "err", "missing id");
+    return null;
+  }
+
+  $("btn-5").disabled = true;
+  $("spin-5").hidden = false;
+  setBadge("badge-5", "run", "reading");
+  try {
+    const data = await requestJson("/api/proxy-events?patientId=" + encodeURIComponent(patientId));
+    renderProxyEventsOutput("out-5", data);
+    if (data && data.targetId) $("f-target").value = data.targetId;
+    setBadge("badge-5", data.ok ? "ok" : "err", data.ok ? "done" : "failed");
+    return data;
+  } catch (e) {
+    $("out-5").innerHTML = '<div class="error-msg">' + escapeHtml(String(e)) + '</div>';
+    setBadge("badge-5", "err", "failed");
+    return null;
+  } finally {
+    $("btn-5").disabled = false;
+    $("spin-5").hidden = true;
+  }
+}
+
+async function runReadPatient() {
+  const patientId = $("f-target").value.trim();
+  if (!patientId) {
+    $("out-6").innerHTML = '<div class="error-msg">Run Step 5 first, or paste a Patient id.</div>';
+    setBadge("badge-6", "err", "missing id");
+    return null;
+  }
+
+  $("btn-6").disabled = true;
+  $("spin-6").hidden = false;
+  setBadge("badge-6", "run", "reading");
+  try {
+    const data = await requestJson("/api/patient?id=" + encodeURIComponent(patientId));
+    renderOutput("out-6", data, "patient");
+    setBadge("badge-6", data.ok ? "ok" : "err", data.ok ? "done" : "failed");
+    return data;
+  } catch (e) {
+    $("out-6").innerHTML = '<div class="error-msg">' + escapeHtml(String(e)) + '</div>';
+    setBadge("badge-6", "err", "failed");
+    return null;
+  } finally {
+    $("btn-6").disabled = false;
+    $("spin-6").hidden = true;
+  }
+}
+
 $("btn-1").addEventListener("click", () =>
-  runStep(1, () => requestJson("/api/setup", { method: "POST", body: "{}" }), "setting up", "ready"));
+  runStep(1, () => requestJson("/api/subscription-topic", { method: "POST", body: "{}" }), "sending", "done"));
 
 $("btn-2").addEventListener("click", () =>
-  runStep(2, () => requestJson("/api/existing-patient", { method: "POST", body: "{}" }), "posting", "created"));
+  runStep(2, () => requestJson("/api/topic-destination", { method: "POST", body: "{}" }), "sending", "done"));
 
 $("btn-3").addEventListener("click", () =>
-  runStep(3, () => requestJson("/api/new-patient", { method: "POST", body: "{}" }), "posting", "created"));
+  runStep(3, () => requestJson("/api/existing-patient", { method: "POST", body: "{}" }), "sending", "done"));
 
 $("btn-4").addEventListener("click", async () => {
   const data = await runStep(
     4,
-    () => requestJson("/api/match", { method: "POST", body: JSON.stringify({ id: NEW_PATIENT_ID }) }),
-    "matching",
-    (d) => (d.matchedId ? "matched " + d.matchedId : "no match"),
+    () => requestJson("/api/incoming-patient", { method: "POST", body: "{}" }),
+    "sending",
+    (d) => d.patientId ? "created " + d.patientId : "done",
   );
-  // Carry the matched id into Step 5 / Step 6.
-  if (data && data.matchedId) {
-    $("f-target").value = data.matchedId;
-    $("f-result").value = data.matchedId;
+  if (data && data.ok && data.patientId) {
+    $("f-patient").value = data.patientId;
   }
 });
 
-$("btn-5").addEventListener("click", async () => {
-  const data = await runStep(
-    5,
-    () => requestJson("/api/merge", { method: "POST", body: JSON.stringify({ sourceId: $("f-source").value.trim(), targetId: $("f-target").value.trim() }) }),
-    "merging",
-    "merged",
-  );
-  if (data && data.ok && data.target) {
-    $("f-result").value = String(data.target).replace(/^Patient\\//, "");
-  }
-});
-
-$("btn-6").addEventListener("click", () =>
-  runStep(6, () => requestJson("/api/patient?id=" + encodeURIComponent($("f-result").value.trim())), "reading", "merge result"));
+$("btn-5").addEventListener("click", runProxyEvents);
+$("btn-6").addEventListener("click", runReadPatient);
 `;
 }

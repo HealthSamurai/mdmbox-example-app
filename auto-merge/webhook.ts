@@ -1,12 +1,12 @@
 /**
- * mdmbox-automerge-webhook - a tiny standalone Bun server.
+ * mdmbox-auto-merge-proxy - a tiny standalone Bun server.
  *
  * Aidbox calls this server (via AidboxTopicDestination) whenever a Patient is
  * created. The server then runs $match + $merge against mdmbox automatically:
  *
- *   Aidbox  --POST /webhooks/patient-created-->  this server
- *   server  --POST /api/fhir/Patient/$match-->   mdmbox   (onlySingleMatch=true)
- *   server  --POST /api/$merge-------------->     mdmbox   (when mdmbox returns a match)
+ *   Aidbox  --POST /webhooks/patient-created-->  auto-merge proxy
+ *   proxy   --POST /api/fhir/Patient/$match-->   mdmbox   (onlySingleMatch=true)
+ *   proxy   --POST /api/$merge-------------->     mdmbox   (when mdmbox returns a match)
  *
  * It is self-contained: it carries its own $match + $merge logic and shares
  * nothing with notebook.ts. The notebook (notebook.ts) is the manual, stepwise
@@ -48,6 +48,7 @@ type FlowEvent = {
   matchedPatient?: JsonRecord;
   mergeRequest?: unknown;
   mergeResponse?: unknown;
+  mergedPatient?: JsonRecord;
   error?: string;
 };
 
@@ -321,10 +322,16 @@ async function processPatientCreated(notification: unknown, patientRef: JsonReco
     flow.mergeRequest = merge.body;
     flow.mergeResponse = merge.result.body;
     assertOk(merge.result, "$merge");
+    const mergedPatient = assertOk(
+      await readMdmboxPatient(plan.target.replace(/^Patient\//, "")),
+      `Read merged ${plan.target} from mdmbox`,
+    ).body as JsonRecord;
+    flow.mergedPatient = mergedPatient;
     flow.status = "merged";
     addStep(flow, "$merge applied", true, {
       source: plan.source,
       target: plan.target,
+      versionId: mergedPatient.meta?.versionId,
     });
     return finishFlow(flow);
   } catch (e) {
@@ -639,6 +646,6 @@ const server = Bun.serve({
   },
 });
 
-console.log(`mdmbox auto-merge webhook server -> http://localhost:${server.port}${WEBHOOK_PATH}`);
+console.log(`mdmbox auto-merge proxy -> http://localhost:${server.port}${WEBHOOK_PATH}`);
 console.log(`Aidbox:  ${AIDBOX_URL}`);
 console.log(`mdmbox:  ${MDMBOX_URL}`);

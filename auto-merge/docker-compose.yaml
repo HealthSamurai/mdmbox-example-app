@@ -1,15 +1,19 @@
 services:
   mdmbox:
     image: healthsamurai/mdmbox:edge
-    pull_policy: every_4w
+    pull_policy: always
     depends_on:
       aidbox-db:
+        condition: service_healthy
+      aidbox:
         condition: service_healthy
     ports:
       - 3003:3000
     environment:
       MDMBOX_AUTH_ENABLED: "false"
       MDMBOX_HTTP_HOST: "0.0.0.0"
+      MDMBOX_API_CLIENT_ID: mdmbox-automerge-client
+      MDMBOX_API_CLIENT_SECRET: mdmbox-automerge-secret
       BOX_DB_HOST: aidbox-db
       BOX_DB_PORT: "5432"
       BOX_DB_DATABASE: aidbox
@@ -45,7 +49,7 @@ services:
 
   aidbox-db:
     image: docker.io/library/postgres:18
-    pull_policy: every_4w
+    pull_policy: always
     ports:
       - "5439:5432"
     volumes:
@@ -66,7 +70,7 @@ services:
 
   aidbox:
     image: healthsamurai/aidboxone:latest
-    pull_policy: every_4w
+    pull_policy: always
     depends_on:
       aidbox-db:
         condition: service_healthy
@@ -110,12 +114,14 @@ services:
 
   notebook:
     image: oven/bun:1
-    pull_policy: every_4w
+    pull_policy: always
     depends_on:
       mdmbox:
         condition: service_healthy
       aidbox:
         condition: service_healthy
+      proxy:
+        condition: service_started
     ports:
       - 3300:3300
     working_dir: /app
@@ -130,23 +136,21 @@ services:
       AIDBOX_AUTH: "Basic cm9vdDpyb290"   # root:root
       MDMBOX_URL: http://mdmbox:3000
       PUBLIC_MDMBOX_URL: http://localhost:3003
-      MDMBOX_ADMIN_AUTH: "Basic cm9vdDpyb290"   # root:root
-      MDMBOX_USER_ID: mdmbox-automerge-user
-      MDMBOX_USER_PASSWORD: mdmbox-automerge-password
       MDMBOX_CLIENT_ID: mdmbox-automerge-client
       MDMBOX_CLIENT_SECRET: mdmbox-automerge-secret
-      MDMBOX_ACCESS_POLICY_ID: mdmbox-automerge-access
       MODEL_ID: patient-example
       WEBHOOK_SECRET: aidbox-to-bun-secret
+      PROXY_URL: http://proxy:3301
+      PUBLIC_PROXY_URL: http://localhost:3301
       # Endpoint Aidbox calls for AidboxTopicDestination webhook delivery —
-      # the standalone webhook server below, not the notebook UI.
-      WEBHOOK_ENDPOINT_URL: http://webhook:3301/webhooks/patient-created
+      # the standalone auto-merge proxy below, not the notebook UI.
+      WEBHOOK_ENDPOINT_URL: http://proxy:3301/webhooks/patient-created
 
-  # Standalone webhook server: Aidbox calls it on Patient/create, and it runs
+  # Standalone auto-merge proxy: Aidbox calls it on Patient/create, and it runs
   # $match + $merge against mdmbox automatically. Self-contained (webhook.ts).
-  webhook:
+  proxy:
     image: oven/bun:1
-    pull_policy: every_4w
+    pull_policy: always
     depends_on:
       mdmbox:
         condition: service_healthy
