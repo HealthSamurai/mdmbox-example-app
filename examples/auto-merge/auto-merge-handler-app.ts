@@ -1,5 +1,5 @@
 /**
- * mdmbox-auto-merge-proxy - a tiny standalone Bun server.
+ * auto-merge handler app
  *
  * Aidbox calls this server (via AidboxTopicDestination) whenever a Patient is
  * created. The server then runs $match + $merge against MDMbox automatically
@@ -636,6 +636,6 @@ const server = Bun.serve({
   },
 });
 
-console.log(`mdmbox auto-merge proxy -> http://localhost:${server.port}${WEBHOOK_PATH}`);
+console.log(`mdmbox auto-merge handler app -> http://localhost:${server.port}${WEBHOOK_PATH}`);
 console.log(`Aidbox:  ${AIDBOX_URL}`);
 console.log(`mdmbox:  ${MDMBOX_URL}`);

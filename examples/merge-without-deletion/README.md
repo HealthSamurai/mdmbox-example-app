@@ -1,13 +1,9 @@
-# Merge that Deactivates the Source
+# Merge Without Deletion
 
-This example shows how to run an MDMbox `$merge` that **does not delete** the
-source patient. Instead of removing the duplicate, the merge plan PUTs it back
+This example shows how to run an MDMbox `$merge` that does not delete the
+source record. Instead of removing the duplicate, the merge plan PUTs it back
 with `active: false` and a `replaced-by` link to the surviving target, so the
 retired record stays queryable for audit and history.
-
-Aidbox and MDMbox in this stack share one database, so a Patient created in
-Aidbox is visible to MDMbox. There are no subscriptions or webhooks here — just a
-manual, five-step `$merge` flow.
 
 ## Set Up Aidbox and MDMbox
 
@@ -41,21 +37,10 @@ that walks through the deactivating `$merge` in five steps:
 
 ## How it works
 
-The notebook first creates two patients in Aidbox via FHIR `PUT` (upsert). The
-target is the survivor and the source is the duplicate:
-
-```json
-{
-  "resourceType": "Patient",
-  "id": "1",
-  "active": true,
-  "name": [{ "use": "official", "given": ["Jane"], "family": "Doe" }]
-}
-```
-
-Then it sends a `$merge` to MDMbox. `$merge` executes the transaction Bundle the
-client sends, so deleting vs. deactivating is purely what the plan contains.
-This example builds two `PUT` entries (no `DELETE`).
+The notebook first creates two patients in Aidbox via FHIR API. Then
+it sends a `$merge` request to MDMbox. `$merge` executes the transaction
+Bundle that the client sends, so deleting vs. deactivating is purely what
+the plan contains.  This example builds two `PUT` entries (no `DELETE`).
 
 The first entry is the **surviving target** (target wins scalar conflicts,
 arrays are union-merged, missing target fields are filled from the source), plus
@@ -90,14 +75,3 @@ The second entry is the **source**, PUT back with `active: false` and a
   "request": { "method": "PUT", "url": "Patient/2" }
 }
 ```
-
-MDMbox `$merge` has no built-in "deactivate" flag — the behaviour comes entirely
-from the plan: a `DELETE` entry would remove the source, while this `PUT` with
-`active: false` retires it. Either way, `$merge` records Task/Provenance for
-audit and unmerge.
-
-## Services
-
-- Aidbox: http://localhost:8888 (create / read patients)
-- MDMbox: http://localhost:3003 (`$merge`)
-- notebook: http://localhost:3300

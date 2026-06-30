@@ -1,18 +1,5 @@
 /**
- * mdmbox-merge-inactive-app - a single-page example served by Bun.
- *
- * Five-step notebook that walks through a $merge which DEACTIVATES the source
- * instead of deleting it:
- *
- *   1. POST Patient/1        - create the target (survivor)
- *   2. POST Patient/2        - create the source (duplicate)
- *   3. POST $merge           - merge Patient/2 into Patient/1, source kept inactive
- *   4. GET  Patient/1        - the merged survivor
- *   5. GET  Patient/2        - active:false + replaced-by -> Patient/1
- *
- * Patients are created and read via Aidbox; $merge runs via mdmbox. Aidbox and
- * mdmbox share one database, so resources created in one are visible to the
- * other.
+ * mdmbox merge-without-deletion notebook.
  */
 
 type JsonRecord = Record<string, any>;
@@ -474,7 +461,7 @@ function renderPage(): string {
 
   <main class="page">
     <header class="page-header">
-      <h1 class="page-title">Run <code>$merge</code> that deactivates the source</h1>
+      <h1 class="page-title"><code>$merge</code> without deletion</h1>
       <p class="page-subtitle">
         Five steps: create two patients, run mdmbox <code>$merge</code>, then read both
         back. The plan <strong>PUTs the source with <code>active:false</code></strong> and a

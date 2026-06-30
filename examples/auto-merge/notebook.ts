@@ -1,7 +1,5 @@
 /**
  * mdmbox auto-merge notebook.
- *
- * This UI presents one REST request per notebook step.
  */
 
 type JsonRecord = Record<string, any>;
@@ -28,10 +26,10 @@ const MODEL_ID = process.env.MODEL_ID || "patient-example";
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "aidbox-to-bun-secret";
 const WEBHOOK_ENDPOINT_URL =
   process.env.WEBHOOK_ENDPOINT_URL || "http://localhost:3301/webhooks/patient-created";
-const PROXY_URL = trimSlash(
-  process.env.PROXY_URL || originFromUrl(WEBHOOK_ENDPOINT_URL) || "http://localhost:3301",
+const AUTO_MERGE_HANDLER_APP_URL = trimSlash(
+  process.env.AUTO_MERGE_HANDLER_APP_URL || originFromUrl(WEBHOOK_ENDPOINT_URL) || "http://localhost:3301",
 );
-const PUBLIC_PROXY_URL = trimSlash(process.env.PUBLIC_PROXY_URL || "http://localhost:3301");
+const PUBLIC_AUTO_MERGE_HANDLER_APP_URL = trimSlash(process.env.PUBLIC_AUTO_MERGE_HANDLER_APP_URL || "http://localhost:3301");
 
 const TOPIC_ID = process.env.AIDBOX_TOPIC_ID || "mdmbox-patient-created";
 const TOPIC_URL =
@@ -143,11 +141,11 @@ async function aidboxFhir(
   });
 }
 
-async function proxyJson(
+async function autoMergeHandlerAppJson(
   path: string,
   opts: { method?: string; body?: unknown } = {},
 ): Promise<JsonResponse> {
-  return jsonRequest(`${PROXY_URL}${path.startsWith("/") ? path : `/${path}`}`, opts);
+  return jsonRequest(`${AUTO_MERGE_HANDLER_APP_URL}${path.startsWith("/") ? path : `/${path}`}`, opts);
 }
 
 function wrapResponse(result: JsonResponse, request: unknown) {
@@ -223,28 +221,28 @@ async function createIncomingPatient() {
   };
 }
 
-async function readProxyEvents(patientId: string) {
+async function readEvents(patientId: string) {
   const id = String(patientId || "").trim();
   if (!id) return { ok: false, status: 400, error: "Patient id is required." };
 
-  const proxy = await proxyJson(`/api/events?patientId=${encodeURIComponent(id)}`);
-  const events = Array.isArray((proxy.body as any)?.events)
-    ? ((proxy.body as any).events as JsonRecord[])
+  const response = await autoMergeHandlerAppJson(`/api/events?patientId=${encodeURIComponent(id)}`);
+  const events = Array.isArray((response.body as any)?.events)
+    ? ((response.body as any).events as JsonRecord[])
     : [];
   const flow = events[0] || null;
   const targetId = targetIdFromFlow(flow);
   const summary = summarizeFlow(flow, id, targetId);
   return {
-    ok: proxy.ok,
-    status: proxy.status,
+    ok: response.ok,
+    status: response.status,
     patientId: id,
     targetId,
     summary,
     request: {
       method: "GET",
-      url: `${PUBLIC_PROXY_URL}/api/events?patientId=${encodeURIComponent(id)}`,
+      url: `${PUBLIC_AUTO_MERGE_HANDLER_APP_URL}/api/events?patientId=${encodeURIComponent(id)}`,
     },
-    response: proxy.body,
+    response: response.body,
   };
 }
 
@@ -582,8 +580,8 @@ const server = Bun.serve({
         publicAidboxUrl: PUBLIC_AIDBOX_URL,
         mdmboxUrl: MDMBOX_URL,
         publicMdmboxUrl: PUBLIC_MDMBOX_URL,
-        proxyUrl: PROXY_URL,
-        publicProxyUrl: PUBLIC_PROXY_URL,
+        autoMergeHandlerAppUrl: AUTO_MERGE_HANDLER_APP_URL,
+        publicAutoMergeHandlerAppUrl: PUBLIC_AUTO_MERGE_HANDLER_APP_URL,
         webhookEndpointUrl: WEBHOOK_ENDPOINT_URL,
         modelId: MODEL_ID,
         existingPatientId: EXISTING_PATIENT_ID,
@@ -630,7 +628,7 @@ const server = Bun.serve({
 
     if (pathname === "/api/proxy-events" && req.method === "GET") {
       try {
-        const result = await readProxyEvents(url.searchParams.get("patientId") || "");
+        const result = await readEvents(url.searchParams.get("patientId") || "");
         return Response.json(result, { status: (result as any).ok ? 200 : (result as any).status || 502 });
       } catch (e) {
         return Response.json({ ok: false, error: String(e) }, { status: 502 });
@@ -650,7 +648,7 @@ const server = Bun.serve({
 console.log(`mdmbox auto-merge notebook -> http://localhost:${server.port}`);
 console.log(`Aidbox:  ${AIDBOX_URL}`);
 console.log(`mdmbox:  ${MDMBOX_URL}`);
-console.log(`proxy:   ${PROXY_URL}`);
+console.log(`auto-merge handler app:   ${AUTO_MERGE_HANDLER_APP_URL}`);
 
 // ---------------------------------------------------------------------------
 // Page
@@ -664,7 +662,7 @@ function renderPage(): string {
   const destinationUrl = `${PUBLIC_AIDBOX_URL}/fhir/AidboxTopicDestination`;
   const existingUrl = `${PUBLIC_AIDBOX_URL}/fhir/Patient/${EXISTING_PATIENT_ID}`;
   const incomingUrl = `${PUBLIC_AIDBOX_URL}/fhir/Patient`;
-  const eventsUrl = `${PUBLIC_PROXY_URL}/api/events?patientId={id}`;
+  const eventsUrl = `${PUBLIC_AUTO_MERGE_HANDLER_APP_URL}/api/events?patientId={id}`;
   const patientUrl = `${PUBLIC_AIDBOX_URL}/fhir/Patient/{id}`;
   return `<!DOCTYPE html>
 <html lang="en">
@@ -680,7 +678,7 @@ function renderPage(): string {
 <body>
   <nav class="navbar">
     <a class="navbar-brand" href="/"><span class="dot"></span><span>mdmbox &times; Aidbox</span></a>
-    <span class="navbar-meta">auto-merge proxy</span>
+    <span class="navbar-meta">auto-merge handler app</span>
   </nav>
 
   <main class="page">
@@ -787,7 +785,7 @@ function renderPage(): string {
       </div>
       <div class="cell-body">
         <p class="muted">
-          Read proxy events for the Patient created in Step 4.
+          Read events for the Patient created in Step 4.
         </p>
         <div class="field-row one">
           <div class="field">
@@ -871,16 +869,16 @@ function renderOutput(hostId, payload, label) {
   $(hostId).innerHTML = outputHtml(payload, label);
 }
 
-function renderProxyEventsOutput(hostId, payload) {
+function renderEventsOutput(hostId, payload) {
   const label = payload && payload.targetId ? "full response, target " + payload.targetId : "full response";
   if (!payload || !payload.ok) {
     renderOutput(hostId, payload, label);
     return;
   }
-  $(hostId).innerHTML = proxySummaryHtml(payload) + outputHtml(payload, label);
+  $(hostId).innerHTML = eventsSummaryHtml(payload) + outputHtml(payload, label);
 }
 
-function proxySummaryHtml(payload) {
+function eventsSummaryHtml(payload) {
   const summary = payload.summary || {};
   const match = summary.match || {};
   const merge = summary.merge || {};
@@ -920,7 +918,7 @@ function summaryCell(label, value) {
 }
 
 function renderFlowSteps(steps) {
-  if (!steps.length) return '<p class="muted flow-detail">No proxy event has been recorded yet.</p>';
+  if (!steps.length) return '<p class="muted flow-detail">No event has been recorded yet.</p>';
   return (
     '<ol class="flow-steps">' +
       steps.map((step) => {
@@ -995,7 +993,7 @@ async function runStep(n, run, runningText, okText) {
   return data;
 }
 
-async function runProxyEvents() {
+async function runEvents() {
   const patientId = $("f-patient").value.trim();
   if (!patientId) {
     $("out-5").innerHTML = '<div class="error-msg">Run Step 4 first, or paste an incoming Patient id.</div>';
@@ -1008,7 +1006,7 @@ async function runProxyEvents() {
   setBadge("badge-5", "run", "reading");
   try {
     const data = await requestJson("/api/proxy-events?patientId=" + encodeURIComponent(patientId));
-    renderProxyEventsOutput("out-5", data);
+    renderEventsOutput("out-5", data);
     if (data && data.targetId) $("f-target").value = data.targetId;
     setBadge("badge-5", data.ok ? "ok" : "err", data.ok ? "done" : "failed");
     return data;
@@ -1069,7 +1067,7 @@ $("btn-4").addEventListener("click", async () => {
   }
 });
 
-$("btn-5").addEventListener("click", runProxyEvents);
+$("btn-5").addEventListener("click", runEvents);
 $("btn-6").addEventListener("click", runReadPatient);
 `;
 }

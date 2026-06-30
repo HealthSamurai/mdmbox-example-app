@@ -120,7 +120,7 @@ services:
         condition: service_healthy
       aidbox:
         condition: service_healthy
-      proxy:
+      auto-merge-handler-app:
         condition: service_started
     ports:
       - 3300:3300
@@ -140,15 +140,15 @@ services:
       MDMBOX_CLIENT_SECRET: mdmbox-automerge-secret
       MODEL_ID: patient-example
       WEBHOOK_SECRET: aidbox-to-bun-secret
-      PROXY_URL: http://proxy:3301
-      PUBLIC_PROXY_URL: http://localhost:3301
+      AUTO_MERGE_HANDLER_APP_URL: http://auto-merge-handler-app:3301
+      PUBLIC_AUTO_MERGE_HANDLER_APP_URL: http://localhost:3301
       # Endpoint Aidbox calls for AidboxTopicDestination webhook delivery —
-      # the standalone auto-merge proxy below, not the notebook UI.
-      WEBHOOK_ENDPOINT_URL: http://proxy:3301/webhooks/patient-created
+      # the standalone auto-merge handler app below, not the notebook UI.
+      WEBHOOK_ENDPOINT_URL: http://auto-merge-handler-app:3301/webhooks/patient-created
 
-  # Standalone auto-merge proxy: Aidbox calls it on Patient/create, and it runs
+  # Standalone auto-merge handler app: Aidbox calls it on Patient/create, and it runs
   # $match + $merge against MDMbox.
-  proxy:
+  auto-merge-handler-app:
     image: oven/bun:1
     pull_policy: always
     depends_on:
@@ -161,7 +161,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app:ro
-    command: ["bun", "webhook.ts"]
+    command: ["bun", "auto-merge-handler-app.ts"]
     environment:
       WEBHOOK_PORT: "3301"
       # In-network service names (containers talk to each other directly).
